@@ -61,13 +61,33 @@ class MainActivity : ComponentActivity() {
     }
 
     val eventListener = remember {
-      object : ComposeSubsamplingScaleImageEventListener {
+      object : ComposeSubsamplingScaleImageEventListener() {
+        override fun onImageInfoDecoded(fullImageSize: IntSize) {
+          logcat(tag = "DisplayFullImage") { "onImageInfoDecoded() fullImageSize=$fullImageSize" }
+        }
+
+        override fun onFailedToDecodeImageInfo(error: Throwable) {
+          logcat(tag = "DisplayFullImage") { "onFailedToDecodeImageInfo() error=${error.asLog()}" }
+        }
+
+        override fun onTileDecoded(tileIndex: Int, totalTilesInTopLayer: Int) {
+          logcat(tag = "DisplayFullImage") { "onTileDecoded() ${tileIndex}/${totalTilesInTopLayer}" }
+        }
+
+        override fun onFailedToDecodeTile(
+          tileIndex: Int,
+          totalTilesInTopLayer: Int,
+          error: Throwable
+        ) {
+          logcat(tag = "DisplayFullImage") { "onTileDecoded() ${tileIndex}/${totalTilesInTopLayer}, error=${error.asLog()}" }
+        }
+
         override fun onFullImageLoaded() {
           logcat(tag = "DisplayFullImage") { "onFullImageLoaded()" }
         }
 
-        override fun onFullImageFailedToLoad(error: Throwable) {
-          logcatError(tag = "DisplayFullImage") { "onFullImageLoaded() error=${error.asLog()}" }
+        override fun onFailedToLoadFullImage(error: Throwable) {
+          logcatError(tag = "DisplayFullImage") { "onFailedToLoadFullImage() error=${error.asLog()}" }
         }
       }
     }
@@ -83,7 +103,7 @@ class MainActivity : ComponentActivity() {
       modifier = Modifier.fillMaxSize(),
       state = rememberComposeSubsamplingScaleImageState(
         minTileDpiDefault = 0,
-        maxMaxTileSizeInfo = { MaxTileSizeInfo.Fixed(IntSize(512, 512)) },
+        maxMaxTileSizeInfo = { MaxTileSizeInfo.Auto() },
         minimumScaleType = { MinimumScaleType.ScaleTypeCenterInside },
         decoderDispatcherLazy = decoderDispatcherLazy,
         debugKey = imageFileName,

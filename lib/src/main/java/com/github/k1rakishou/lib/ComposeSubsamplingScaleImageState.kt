@@ -19,6 +19,7 @@ import com.github.k1rakishou.lib.helpers.errorMessageOrClassName
 import com.github.k1rakishou.lib.helpers.exceptionOrThrow
 import com.github.k1rakishou.lib.helpers.unwrap
 import java.io.InputStream
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -136,7 +137,8 @@ class ComposeSubsamplingScaleImageState(
   }
 
   suspend fun initialize(
-    imageSourceProvider: ImageSourceProvider
+    imageSourceProvider: ImageSourceProvider,
+    eventListener: ComposeSubsamplingScaleImageEventListener?
   ): InitializationState {
     BackgroundUtils.ensureMainThread()
 
@@ -147,7 +149,10 @@ class ComposeSubsamplingScaleImageState(
       )
 
       if (!success) {
-        error("Decoder was already initialized!")
+        val exception = IllegalStateException("Decoder was already initialized!")
+        eventListener?.onFailedToDecodeImageInfo(exception)
+
+        throw exception
       }
     }
 
@@ -165,12 +170,14 @@ class ComposeSubsamplingScaleImageState(
           "imageDimensionsInfoResultError=${error.asLog()}"
       }
 
+      eventListener?.onFailedToDecodeImageInfo(error)
       reset()
       return InitializationState.Error(error)
     } else {
       imageDimensionsInfoResult.getOrThrow()
     }
 
+    eventListener?.onImageInfoDecoded(imageDimensions)
     sourceImageDimensions = imageDimensions
 
     if (debug) {
@@ -214,7 +221,10 @@ class ComposeSubsamplingScaleImageState(
     val baseGrid = tileMap[fullImageSampleSizeState.value]!!
     baseGrid.forEach { baseTile -> baseTile.tileState = TileState.Loading }
 
-    loadTiles(baseGrid)
+    loadTiles(
+      baseGrid = baseGrid,
+      eventListener = eventListener
+    )
 
     fitToBounds(false)
     refreshRequiredTiles(
@@ -257,8 +267,12 @@ class ComposeSubsamplingScaleImageState(
     }
   }
 
-  private suspend fun loadTiles(baseGrid: List<Tile>) {
+  private suspend fun loadTiles(
+    baseGrid: List<Tile>,
+    eventListener: ComposeSubsamplingScaleImageEventListener?
+  ) {
     if (baseGrid.isEmpty()) {
+      eventListener?.onFullImageLoaded()
       return
     }
 
@@ -271,12 +285,19 @@ class ComposeSubsamplingScaleImageState(
     }
 
     val decoder = subsamplingImageDecoder.get()
-      ?: error("Decoder is not initialized!")
+    if (decoder == null) {
+      val exception = IllegalStateException("Decoder is not initialized!")
+      eventListener?.onFailedToLoadFullImage(exception)
+      throw exception
+    }
 
     val startTime = SystemClock.elapsedRealtime()
     if (debug) {
       logcat { "loadTiles() start, tiles=${baseGrid.size}" }
     }
+
+    val totalTilesCount = baseGrid.size
+    val remaining = AtomicInteger(totalTilesCount)
 
     coroutineScope {
       baseGrid.mapIndexed { index, tile ->
@@ -285,7 +306,10 @@ class ComposeSubsamplingScaleImageState(
 
           try {
             if (debug) {
-              logcat { "loadTiles($index, ${threadName}) decoding tile with bounds: ${tile.fileSourceRect}..." }
+              logcat {
+                "loadTiles($index, ${threadName}) decoding tile with " +
+                "bounds: ${tile.fileSourceRect}..."
+              }
             }
 
             val decodedTileBitmap = runInterruptible {
@@ -296,21 +320,34 @@ class ComposeSubsamplingScaleImageState(
             }
 
             if (debug) {
-              logcat { "loadTiles($index, ${threadName}) decoding tile with bounds: ${tile.fileSourceRect}...done" }
+              logcat {
+                "loadTiles($index, ${threadName}) decoding tile with " +
+                "bounds: ${tile.fileSourceRect}...done"
+              }
             }
 
+            eventListener?.onTileDecoded(index, totalTilesCount - 1)
             tile.tileState = TileState.Loaded(decodedTileBitmap)
           } catch (error: Throwable) {
             if (debug) {
-              logcatError { "loadTiles($index, ${threadName}) Failed to decode tile: $tile, error: ${error.errorMessageOrClassName()}" }
+              logcatError {
+                "loadTiles($index, ${threadName}) Failed to decode tile: $tile, " +
+                  "error: ${error.errorMessageOrClassName()}"
+              }
             }
 
+            eventListener?.onFailedToDecodeTile(index, totalTilesCount - 1, error)
             tile.tileState = TileState.Error(error)
 
             if (error is CancellationException) {
               throw error
             }
           } finally {
+            val allProcessed = remaining.addAndGet(-1) == 0
+            if (allProcessed) {
+              eventListener?.onFullImageLoaded()
+            }
+
             invalidate.value = invalidate.value + 1
           }
         }
@@ -367,7 +404,10 @@ class ComposeSubsamplingScaleImageState(
       logcat { "tilesToLoadCount=${tilesToLoad.size}" }
     }
 
-    loadTiles(tilesToLoad)
+    loadTiles(
+      baseGrid = tilesToLoad,
+      eventListener = null
+    )
   }
 
   private fun tileVisible(tile: Tile): Boolean {

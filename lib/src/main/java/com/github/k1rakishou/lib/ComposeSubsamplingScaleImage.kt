@@ -126,20 +126,8 @@ fun ComposeSubsamplingScaleImage(
         }
 
         state.availableDimensions.value = IntSize(minWidthPx, minHeightPx)
-        val initializationState = state.initialize(imageSourceProvider)
+        val initializationState = state.initialize(imageSourceProvider, eventListener)
         state.initializationState.value = initializationState
-
-        when (initializationState) {
-          InitializationState.Uninitialized -> {
-            // no-op
-          }
-          is InitializationState.Error -> {
-            eventListener?.onFullImageFailedToLoad(initializationState.exception)
-          }
-          is InitializationState.Success -> {
-            eventListener?.onFullImageLoaded()
-          }
-        }
       }
     )
 
