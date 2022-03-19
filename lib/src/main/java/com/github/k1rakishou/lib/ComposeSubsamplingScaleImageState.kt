@@ -6,6 +6,7 @@ import android.content.res.Resources
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.PointF
+import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.util.Log
 import androidx.compose.runtime.RememberObserver
@@ -14,22 +15,22 @@ import androidx.compose.ui.unit.IntSize
 import com.github.k1rakishou.lib.helpers.BackgroundUtils
 import com.github.k1rakishou.lib.helpers.Try
 import com.github.k1rakishou.lib.helpers.asLog
+import com.github.k1rakishou.lib.helpers.errorMessageOrClassName
 import com.github.k1rakishou.lib.helpers.exceptionOrThrow
 import com.github.k1rakishou.lib.helpers.unwrap
 import java.io.InputStream
-import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicReference
-import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 
 internal val maximumBitmapSizeState = mutableStateOf<IntSize?>(null)
-
-// TODO(KurobaEx): move to parameters of state
-private val decoderDispatcher = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors())
-  .asCoroutineDispatcher()
 
 class ComposeSubsamplingScaleImageState(
   val context: Context,
@@ -38,10 +39,16 @@ class ComposeSubsamplingScaleImageState(
   val minScaleParam: Float?,
   val maxScaleParam: Float?,
   val ImageDecoderProvider: ImageDecoderProvider,
+  val decoderDispatcherLazy: Lazy<CoroutineDispatcher>,
   val debug: Boolean,
   private val minTileDpiDefault: Int,
   private val debugKey: String?
 ) : RememberObserver {
+  private val defaultMaxScale = 2f
+  private val _decoderDispatcher by decoderDispatcherLazy
+  private val job = SupervisorJob()
+  private val coroutineScope = CoroutineScope(_decoderDispatcher + job)
+
   internal val screenTranslate = PointState()
   internal val tileMap = LinkedHashMap<Int, MutableList<Tile>>()
   internal val minTileDpi by lazy { minTileDpi() }
@@ -72,6 +79,11 @@ class ComposeSubsamplingScaleImageState(
   val fullImageSampleSizeState = mutableStateOf(0)
   val availableDimensions = mutableStateOf(IntSize.Zero)
 
+  // Tile are loaded asynchronously.
+  // invalidate value is incremented every time we decode a new tile.
+  // It's needed to notify the composition to redraw current tileMap.
+  val invalidate = mutableStateOf(0)
+
   val availableWidth: Int
     get() = availableDimensions.value.width
   val availableHeight: Int
@@ -94,6 +106,10 @@ class ComposeSubsamplingScaleImageState(
   }
 
   private fun minTileDpi(): Int {
+    if (minTileDpiDefault <= 0) {
+      return 0
+    }
+
     val metrics = context.resources.displayMetrics
     val averageDpi = (metrics.xdpi + metrics.ydpi) / 2
     return Math.min(averageDpi, minTileDpiDefault.toFloat()).toInt()
@@ -104,6 +120,7 @@ class ComposeSubsamplingScaleImageState(
 
     tileMap.entries.forEach { (_, tiles) -> tiles.forEach { tile -> tile.recycle() } }
     tileMap.clear()
+    job.cancelChildren()
 
     satTemp.reset()
     bitmapMatrix.reset()
@@ -134,7 +151,7 @@ class ComposeSubsamplingScaleImageState(
       }
     }
 
-    val imageDimensionsInfoResult = withContext(decoderDispatcher) {
+    val imageDimensionsInfoResult = withContext(coroutineScope.coroutineContext) {
       imageSourceProvider.provide()
         .inputStream
         .use { inputStream -> decodeImageDimensions(inputStream) }
@@ -142,7 +159,7 @@ class ComposeSubsamplingScaleImageState(
 
     val imageDimensions = if (imageDimensionsInfoResult.isFailure) {
       val error = imageDimensionsInfoResult.exceptionOrThrow()
-      logcat(debugKey = debugKey) {
+      logcat {
         "initialize() decodeImageDimensions() Failure!\n" +
           "sourceDebugKey=${debugKey}\n" +
           "imageDimensionsInfoResultError=${error.asLog()}"
@@ -157,7 +174,7 @@ class ComposeSubsamplingScaleImageState(
     sourceImageDimensions = imageDimensions
 
     if (debug) {
-      logcat(debugKey = debugKey) { "initialize() decodeImageDimensions() Success! imageDimensions=$imageDimensions" }
+      logcat { "initialize() decodeImageDimensions() Success! imageDimensions=$imageDimensions" }
     }
 
     satTemp.reset()
@@ -174,8 +191,8 @@ class ComposeSubsamplingScaleImageState(
     }
 
     if (debug) {
-      logcat(debugKey = debugKey) { "initialize() fullImageSampleSizeState=${fullImageSampleSizeState.value}" }
-      logcat(debugKey = debugKey) { "initialiseTileMap maxTileDimensions=${maxMaxTileSizeInfo.width}x${maxMaxTileSizeInfo.height}" }
+      logcat { "initialize() fullImageSampleSizeState=${fullImageSampleSizeState.value}" }
+      logcat { "initialiseTileMap maxTileDimensions=${maxMaxTileSizeInfo.width}x${maxMaxTileSizeInfo.height}" }
     }
 
     initialiseTileMap(
@@ -190,7 +207,7 @@ class ComposeSubsamplingScaleImageState(
 
     if (debug) {
       tileMap.entries.forEach { (sampleSize, tiles) ->
-        logcat(debugKey = debugKey) { "initialiseTileMap sampleSize=$sampleSize, tilesCount=${tiles.size}" }
+        logcat { "initialiseTileMap sampleSize=$sampleSize, tilesCount=${tiles.size}" }
       }
     }
 
@@ -256,27 +273,53 @@ class ComposeSubsamplingScaleImageState(
     val decoder = subsamplingImageDecoder.get()
       ?: error("Decoder is not initialized!")
 
+    val startTime = SystemClock.elapsedRealtime()
+    if (debug) {
+      logcat { "loadTiles() start, tiles=${baseGrid.size}" }
+    }
+
     coroutineScope {
-      baseGrid.map { tile ->
-        async(decoderDispatcher) {
+      baseGrid.mapIndexed { index, tile ->
+        coroutineScope.launch {
+          val threadName = Thread.currentThread().name
+
           try {
-            val decodedTileBitmap = decoder.decodeRegion(
-              sRect = tile.fileSourceRect.toAndroidRect(),
-              sampleSize = tile.sampleSize
-            ).unwrap()
+            if (debug) {
+              logcat { "loadTiles($index, ${threadName}) decoding tile with bounds: ${tile.fileSourceRect}..." }
+            }
+
+            val decodedTileBitmap = runInterruptible {
+              decoder.decodeRegion(
+                sRect = tile.fileSourceRect.toAndroidRect(),
+                sampleSize = tile.sampleSize
+              ).unwrap()
+            }
+
+            if (debug) {
+              logcat { "loadTiles($index, ${threadName}) decoding tile with bounds: ${tile.fileSourceRect}...done" }
+            }
 
             tile.tileState = TileState.Loaded(decodedTileBitmap)
           } catch (error: Throwable) {
             if (debug) {
-              logcatError(debugKey = debugKey) { "Failed to decode tile: $tile, error: ${error.asLog()}" }
+              logcatError { "loadTiles($index, ${threadName}) Failed to decode tile: $tile, error: ${error.errorMessageOrClassName()}" }
             }
 
             tile.tileState = TileState.Error(error)
+
+            if (error is CancellationException) {
+              throw error
+            }
+          } finally {
+            invalidate.value = invalidate.value + 1
           }
         }
-        // TODO(KurobaEx): maybe we don't need to await them all here and can just draw them
-        //  asyncronously once they load?
-      }.awaitAll()
+      }
+    }
+
+    if (debug) {
+      val timeDiff = SystemClock.elapsedRealtime() - startTime
+      logcat { "loadTiles() end, tiles=${baseGrid.size}, took: ${timeDiff}ms" }
     }
   }
 
@@ -296,11 +339,7 @@ class ComposeSubsamplingScaleImageState(
 
     // Load tiles of the correct sample size that are on screen. Discard tiles off screen, and those that are higher
     // resolution than required, or lower res than required but not the base layer, so the base layer is always present.
-    for ((currentSampleSize, tiles) in tileMap) {
-      if (tiles.isNotEmpty() && debug) {
-        logcat(debugKey = debugKey) { "\n" }
-      }
-
+    for ((_, tiles) in tileMap) {
       for (tile in tiles) {
         if (tile.sampleSize < sampleSize || tile.sampleSize > sampleSize && tile.sampleSize != fullImageSampleSize) {
           tile.visible = false
@@ -321,15 +360,11 @@ class ComposeSubsamplingScaleImageState(
         } else if (tile.sampleSize == fullImageSampleSize) {
           tile.visible = true
         }
-
-        if (debug) {
-          logcat(debugKey = debugKey) { "Tile[$currentSampleSize] visible=${tile.visible}, tileState=${tile.tileState}" }
-        }
       }
     }
 
     if (debug) {
-      logcat(debugKey = debugKey) { "tilesToLoadCount=${tilesToLoad.size}" }
+      logcat { "tilesToLoadCount=${tilesToLoad.size}" }
     }
 
     loadTiles(tilesToLoad)
@@ -582,6 +617,10 @@ class ComposeSubsamplingScaleImageState(
       return maxScaleParam
     }
 
+    if (dpi <= 0) {
+      return defaultMaxScale
+    }
+
     val metrics = getResources().displayMetrics
     val averageDpi = (metrics.xdpi + metrics.ydpi) / 2
     return averageDpi / dpi
@@ -644,7 +683,6 @@ class ComposeSubsamplingScaleImageState(
 
   @SuppressLint("LongLogTag")
   private fun logcat(
-    debugKey: String?,
     message: () -> String
   ) {
     val msg = buildString {
@@ -660,7 +698,6 @@ class ComposeSubsamplingScaleImageState(
 
   @SuppressLint("LongLogTag")
   private fun logcatError(
-    debugKey: String?,
     message: () -> String
   ) {
     val msg = buildString {

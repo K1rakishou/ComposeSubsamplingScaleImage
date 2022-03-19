@@ -50,4 +50,8 @@ internal data class RectMut(
     size = Size((right - left).toFloat(), (bottom - top).toFloat())
   }
 
+  override fun toString(): String {
+    return "RectMut($left, $top, $right, $bottom)"
+  }
+
 }

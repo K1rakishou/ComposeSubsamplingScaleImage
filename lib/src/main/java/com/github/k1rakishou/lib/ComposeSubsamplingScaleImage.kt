@@ -30,6 +30,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.github.k1rakishou.lib.helpers.logcat
+import java.util.concurrent.Executors
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
@@ -41,6 +44,11 @@ private val defaultDecoderProvider = object : ImageDecoderProvider {
   }
 }
 
+private val defaultDecoderDispatcher = lazy {
+  Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors())
+    .asCoroutineDispatcher()
+}
+
 @Composable
 fun rememberComposeSubsamplingScaleImageState(
   minTileDpiDefault: Int = 320,
@@ -50,6 +58,7 @@ fun rememberComposeSubsamplingScaleImageState(
   maxScale: Float? = null,
   debugKey: String? = null,
   debug: Boolean = false,
+  decoderDispatcherLazy: Lazy<CoroutineDispatcher> = defaultDecoderDispatcher,
   ImageDecoderProvider: ImageDecoderProvider = remember { defaultDecoderProvider }
 ): ComposeSubsamplingScaleImageState {
   val context = LocalContext.current
@@ -64,6 +73,7 @@ fun rememberComposeSubsamplingScaleImageState(
       minScaleParam = minScale,
       maxScaleParam = maxScale,
       ImageDecoderProvider = ImageDecoderProvider,
+      decoderDispatcherLazy = decoderDispatcherLazy,
       debug = debug,
       minTileDpiDefault = minTileDpiDefault,
       debugKey = debugKey
@@ -144,12 +154,15 @@ fun ComposeSubsamplingScaleImage(
         FullImageErrorLoadingContent?.invoke(initialization.exception)
       }
       is InitializationState.Success -> {
+        val invalidate by state.invalidate
+
         Canvas(
           modifier = modifier.then(Modifier.clipToBounds()),
           onDraw = {
             DrawTileGrid(
               state = state,
               sourceImageDimensions = state.sourceImageDimensions,
+              invalidate = invalidate,
               debugValues = debugValues
             )
           }
@@ -192,6 +205,7 @@ private fun detectCanvasMaxBitmapSize(onBitmapSizeDetected: (IntSize) -> Unit): 
 private fun DrawScope.DrawTileGrid(
   state: ComposeSubsamplingScaleImageState,
   sourceImageDimensions: IntSize?,
+  invalidate: Int,
   debugValues: DebugValues
 ) {
   if (sourceImageDimensions == null) {

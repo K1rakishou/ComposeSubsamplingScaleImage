@@ -22,6 +22,8 @@ import com.google.accompanist.pager.HorizontalPager
 import com.google.accompanist.pager.rememberPagerState
 import java.io.PrintWriter
 import java.io.StringWriter
+import java.util.concurrent.Executors
+import kotlinx.coroutines.asCoroutineDispatcher
 
 class MainActivity : ComponentActivity() {
   private val baseDir = "test_images"
@@ -70,11 +72,20 @@ class MainActivity : ComponentActivity() {
       }
     }
 
+    val decoderDispatcherLazy = remember {
+      lazy {
+        Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors())
+          .asCoroutineDispatcher()
+      }
+    }
+
     ComposeSubsamplingScaleImage(
       modifier = Modifier.fillMaxSize(),
       state = rememberComposeSubsamplingScaleImageState(
-        maxMaxTileSizeInfo = { MaxTileSizeInfo.Fixed(IntSize(2048, 2048)) },
+        minTileDpiDefault = 0,
+        maxMaxTileSizeInfo = { MaxTileSizeInfo.Fixed(IntSize(512, 512)) },
         minimumScaleType = { MinimumScaleType.ScaleTypeCenterInside },
+        decoderDispatcherLazy = decoderDispatcherLazy,
         debugKey = imageFileName,
         debug = true
       ),
