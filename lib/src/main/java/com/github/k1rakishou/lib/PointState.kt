@@ -3,7 +3,7 @@ package com.github.k1rakishou.lib
 import android.graphics.PointF
 import androidx.compose.runtime.mutableStateOf
 
-internal class PointState {
+class PointState {
   val xState = mutableStateOf(0)
   val yState = mutableStateOf(0)
 
@@ -11,6 +11,8 @@ internal class PointState {
     get() = xState.value
   val y: Int
     get() = yState.value
+  val isEmpty: Boolean
+    get() = xState.value <= 0 && yState.value <= 0
 
   fun set(x: Int, y: Int) {
     this.xState.value = x

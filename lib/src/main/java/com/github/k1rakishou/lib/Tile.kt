@@ -2,10 +2,19 @@ package com.github.k1rakishou.lib
 
 import android.graphics.Bitmap
 
-internal class Tile {
+// TODO(KurobaEx): bitmap pooling?
+internal class Tile(
+  val x: Int,
+  val y: Int
+) {
+  val xy: String
+    get() = "${x}x${y}"
+
   @get:Synchronized
   @set:Synchronized
   var tileState: TileState? = null
+    private set
+
   @get:Synchronized
   @set:Synchronized
   var sampleSize = 0
@@ -19,12 +28,10 @@ internal class Tile {
   @get:Synchronized
   val isLoaded: Boolean
     get() = tileState is TileState.Loaded
+
   @get:Synchronized
-  val isError: Boolean
-    get() = tileState is TileState.Error
-  @get:Synchronized
-  val bitmapOrNull: Bitmap?
-    get() = (tileState as? TileState.Loaded)?.bitmap
+  val canLoad: Boolean
+    get() = tileState == null || tileState is TileState.Error
 
   // sRect
   @get:Synchronized
@@ -39,14 +46,35 @@ internal class Tile {
   val fileSourceRect: RectMut = RectMut(0, 0, 0, 0)
 
   @Synchronized
+  fun updateStateAsLoading(): Boolean {
+    if (isLoading || isLoaded) {
+      return false
+    }
+
+    tileState = TileState.Loading
+    return true
+  }
+
+  @Synchronized
+  fun onTileLoadError(error: Throwable) {
+    tileState = TileState.Error(error)
+  }
+
+  @Synchronized
+  fun onTileLoaded(decodedTileBitmap: Bitmap) {
+    tileState = TileState.Loaded(decodedTileBitmap)
+  }
+
+  @Synchronized
   fun recycle() {
+    visible = false
+
     (tileState as? TileState.Loaded)?.bitmap?.recycle()
     tileState = null
-    visible = false
   }
 
   override fun toString(): String {
-    return "Tile(sampleSize=$sampleSize, tileState=$tileState, visible=$visible, " +
+    return "Tile($xy, sampleSize=$sampleSize, tileState=$tileState, visible=$visible, " +
       "sourceRect=$sourceRect, screenRect=$screenRect, fileSourceRect=$fileSourceRect)"
   }
 

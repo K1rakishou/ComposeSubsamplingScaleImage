@@ -9,6 +9,7 @@ import android.graphics.PointF
 import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.util.Log
+import androidx.annotation.GuardedBy
 import androidx.compose.runtime.RememberObserver
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.unit.IntSize
@@ -24,9 +25,10 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
@@ -39,22 +41,24 @@ class ComposeSubsamplingScaleImageState(
   val minimumScaleType: MinimumScaleType,
   val minScaleParam: Float?,
   val maxScaleParam: Float?,
-  val ImageDecoderProvider: ImageDecoderProvider,
+  val eagerTileLoadingEnabled: Boolean,
+  val imageDecoderProvider: ImageDecoderProvider,
   val decoderDispatcherLazy: Lazy<CoroutineDispatcher>,
   val debug: Boolean,
   private val minTileDpiDefault: Int,
   private val debugKey: String?
 ) : RememberObserver {
-  private val defaultMaxScale = 2f
-  private val _decoderDispatcher by decoderDispatcherLazy
-  private val job = SupervisorJob()
-  private val coroutineScope = CoroutineScope(_decoderDispatcher + job)
+  private val decoderDispatcher by decoderDispatcherLazy
+  private lateinit var coroutineScope: CoroutineScope
 
-  internal val screenTranslate = PointState()
+  @GuardedBy("this")
+  private val currentLoadTileJobs = mutableListOf<Job>()
+
+  private val defaultMaxScale = 2f
   internal val tileMap = LinkedHashMap<Int, MutableList<Tile>>()
-  internal val minTileDpi by lazy { minTileDpi() }
-  internal val minScale by lazy { calculateMinScale() }
-  internal val maxScale by lazy { calculateMaxScale(minTileDpi) }
+  private val minTileDpi by lazy { minTileDpi() }
+  val minScale by lazy { calculateMinScale() }
+  val maxScale by lazy { calculateMaxScale(minTileDpi) }
 
   private var satTemp = ScaleAndTranslate()
   private var needInitScreenTranslate = true
@@ -75,6 +79,7 @@ class ComposeSubsamplingScaleImageState(
 
   private val subsamplingImageDecoder = AtomicReference<ComposeSubsamplingScaleImageDecoder?>(null)
 
+  val screenTranslate = PointState()
   val initializationState = mutableStateOf<InitializationState>(InitializationState.Uninitialized)
   val scaleState = mutableStateOf(0f)
   val fullImageSampleSizeState = mutableStateOf(0)
@@ -95,7 +100,11 @@ class ComposeSubsamplingScaleImageState(
   val sourceHeight: Int
     get() = requireNotNull(sourceImageDimensions?.height) { "sourceImageDimensions is null!" }
 
+  val currentScale: Float
+    get() = scaleState.value
+
   override fun onRemembered() {
+    coroutineScope = CoroutineScope(decoderDispatcher)
   }
 
   override fun onForgotten() {
@@ -106,22 +115,17 @@ class ComposeSubsamplingScaleImageState(
     reset()
   }
 
-  private fun minTileDpi(): Int {
-    if (minTileDpiDefault <= 0) {
-      return 0
-    }
-
-    val metrics = context.resources.displayMetrics
-    val averageDpi = (metrics.xdpi + metrics.ydpi) / 2
-    return Math.min(averageDpi, minTileDpiDefault.toFloat()).toInt()
-  }
-
   private fun reset() {
     screenTranslate.reset()
 
     tileMap.entries.forEach { (_, tiles) -> tiles.forEach { tile -> tile.recycle() } }
     tileMap.clear()
-    job.cancelChildren()
+    coroutineScope.cancel()
+
+    synchronized(this) {
+      currentLoadTileJobs.forEach { job -> job.cancel() }
+      currentLoadTileJobs.clear()
+    }
 
     satTemp.reset()
     bitmapMatrix.reset()
@@ -136,6 +140,16 @@ class ComposeSubsamplingScaleImageState(
     initializationState.value = InitializationState.Uninitialized
   }
 
+  private fun minTileDpi(): Int {
+    if (minTileDpiDefault <= 0) {
+      return 0
+    }
+
+    val metrics = context.resources.displayMetrics
+    val averageDpi = (metrics.xdpi + metrics.ydpi) / 2
+    return Math.min(averageDpi, minTileDpiDefault.toFloat()).toInt()
+  }
+
   suspend fun initialize(
     imageSourceProvider: ImageSourceProvider,
     eventListener: ComposeSubsamplingScaleImageEventListener?
@@ -145,14 +159,14 @@ class ComposeSubsamplingScaleImageState(
     if (subsamplingImageDecoder.get() == null) {
       val success = subsamplingImageDecoder.compareAndSet(
         null,
-        ImageDecoderProvider.provide()
+        imageDecoderProvider.provide()
       )
 
       if (!success) {
         val exception = IllegalStateException("Decoder was already initialized!")
         eventListener?.onFailedToDecodeImageInfo(exception)
 
-        throw exception
+        return InitializationState.Error(exception)
       }
     }
 
@@ -219,21 +233,29 @@ class ComposeSubsamplingScaleImageState(
     }
 
     val baseGrid = tileMap[fullImageSampleSizeState.value]!!
-    baseGrid.forEach { baseTile -> baseTile.tileState = TileState.Loading }
 
-    loadTiles(
-      baseGrid = baseGrid,
+    val loadTilesResult = loadTiles(
+      tilesToLoad = baseGrid,
       eventListener = eventListener
     )
 
+    if (loadTilesResult.isFailure) {
+      return InitializationState.Error(loadTilesResult.exceptionOrThrow())
+    }
+
     fitToBounds(false)
-    refreshRequiredTiles(
+
+    val refreshTilesResult = refreshRequiredTilesInternal(
       load = true,
       sourceWidth = imageDimensions.width,
       sourceHeight = imageDimensions.height,
       fullImageSampleSize = fullImageSampleSizeState.value,
       scale = scaleState.value
     )
+
+    if (refreshTilesResult.isFailure) {
+      return InitializationState.Error(refreshTilesResult.exceptionOrThrow())
+    }
 
     return InitializationState.Success
   }
@@ -244,7 +266,7 @@ class ComposeSubsamplingScaleImageState(
     for ((key, value) in tileMap.entries) {
       if (key == sampleSize) {
         for (tile in value) {
-          if (tile.visible && (tile.isLoading || !tile.isLoaded)) {
+          if (tile.visible && !tile.isLoaded) {
             hasMissingTiles = true
           }
         }
@@ -268,49 +290,61 @@ class ComposeSubsamplingScaleImageState(
   }
 
   private suspend fun loadTiles(
-    baseGrid: List<Tile>,
+    tilesToLoad: List<Tile>,
     eventListener: ComposeSubsamplingScaleImageEventListener?
-  ) {
-    if (baseGrid.isEmpty()) {
+  ): Result<Unit> {
+    if (tilesToLoad.isEmpty()) {
       eventListener?.onFullImageLoaded()
-      return
+      return Result.success(Unit)
     }
 
     if (debug) {
-      baseGrid.forEach { tile ->
-        check(tile.tileState == null || tile.tileState is TileState.Loading) {
-          "Unexpected tileState: ${tile.tileState}"
-        }
-      }
+      logcat { "tilesToLoadCount=${tilesToLoad.size}" }
     }
 
     val decoder = subsamplingImageDecoder.get()
     if (decoder == null) {
       val exception = IllegalStateException("Decoder is not initialized!")
       eventListener?.onFailedToLoadFullImage(exception)
-      throw exception
+      return Result.failure(exception)
     }
 
     val startTime = SystemClock.elapsedRealtime()
     if (debug) {
-      logcat { "loadTiles() start, tiles=${baseGrid.size}" }
+      logcat { "loadTiles() start, tiles=${tilesToLoad.size}" }
     }
 
-    val totalTilesCount = baseGrid.size
+    val totalTilesCount = tilesToLoad.size
     val remaining = AtomicInteger(totalTilesCount)
 
+    synchronized(this) {
+      currentLoadTileJobs.forEach { job -> job.cancel() }
+      currentLoadTileJobs.clear()
+    }
+
     coroutineScope {
-      baseGrid.mapIndexed { index, tile ->
-        coroutineScope.launch {
-          val threadName = Thread.currentThread().name
+      tilesToLoad.forEachIndexed { index, tile ->
+        val threadName = Thread.currentThread().name
+
+        if (!tile.updateStateAsLoading()) {
+          // Skip already loaded
+          logcat {
+            "loadTiles($index, ${threadName}) skipping already loaded tile " +
+              "bounds: ${tile.fileSourceRect}...done"
+          }
+
+          return@forEachIndexed
+        }
+
+        val newJob = coroutineScope.launch {
+          BackgroundUtils.ensureBackgroundThread()
 
           try {
             if (debug) {
-              logcat {
-                "loadTiles($index, ${threadName}) decoding tile with " +
-                "bounds: ${tile.fileSourceRect}..."
-              }
+              logcat { "loadTiles($index, ${threadName}) decoding tile at ${tile.xy}" }
             }
+
+            ensureActive()
 
             val decodedTileBitmap = runInterruptible {
               decoder.decodeRegion(
@@ -319,26 +353,20 @@ class ComposeSubsamplingScaleImageState(
               ).unwrap()
             }
 
-            if (debug) {
-              logcat {
-                "loadTiles($index, ${threadName}) decoding tile with " +
-                "bounds: ${tile.fileSourceRect}...done"
-              }
-            }
-
-            eventListener?.onTileDecoded(index, totalTilesCount - 1)
-            tile.tileState = TileState.Loaded(decodedTileBitmap)
+            eventListener?.onTileDecoded(index + 1, totalTilesCount)
+            tile.onTileLoaded(decodedTileBitmap)
           } catch (error: Throwable) {
             if (debug) {
               logcatError {
-                "loadTiles($index, ${threadName}) Failed to decode tile: $tile, " +
+                "loadTiles($index, ${threadName}) Failed to decode tile at ${tile.xy}, " +
                   "error: ${error.errorMessageOrClassName()}"
               }
             }
 
-            eventListener?.onFailedToDecodeTile(index, totalTilesCount - 1, error)
-            tile.tileState = TileState.Error(error)
+            eventListener?.onFailedToDecodeTile(index + 1, totalTilesCount, error)
+            tile.onTileLoadError(error)
 
+            // Consume all non CancellationException errors
             if (error is CancellationException) {
               throw error
             }
@@ -351,63 +379,95 @@ class ComposeSubsamplingScaleImageState(
             invalidate.value = invalidate.value + 1
           }
         }
+
+        synchronized(this) {
+          currentLoadTileJobs += newJob
+        }
       }
     }
 
     if (debug) {
       val timeDiff = SystemClock.elapsedRealtime() - startTime
-      logcat { "loadTiles() end, tiles=${baseGrid.size}, took: ${timeDiff}ms" }
+      logcat { "loadTiles() end, tiles=${tilesToLoad.size}, took: ${timeDiff}ms" }
+    }
+
+    return Result.success(Unit)
+  }
+
+  fun refreshRequiredTiles() {
+    coroutineScope.launch {
+      val imageDimensions = sourceImageDimensions
+        ?: return@launch
+
+      val refreshTilesResult = refreshRequiredTilesInternal(
+        load = eagerTileLoadingEnabled,
+        sourceWidth = imageDimensions.width,
+        sourceHeight = imageDimensions.height,
+        fullImageSampleSize = fullImageSampleSizeState.value,
+        scale = scaleState.value
+      )
+
+      // Do nothing?
     }
   }
 
-  private suspend fun refreshRequiredTiles(
+  private suspend fun refreshRequiredTilesInternal(
     load: Boolean,
     sourceWidth: Int,
     sourceHeight: Int,
     fullImageSampleSize: Int,
     scale: Float
-  ) {
-    val sampleSize = Math.min(
+  ): Result<Unit> {
+    val currentSampleSize = Math.min(
       fullImageSampleSize,
-      calculateInSampleSize(sourceWidth, sourceHeight, scale)
+      calculateInSampleSize(
+        sourceWidth = sourceWidth,
+        sourceHeight = sourceHeight,
+        scale = scale
+      )
     )
 
     val tilesToLoad = mutableListOf<Tile>()
 
-    // Load tiles of the correct sample size that are on screen. Discard tiles off screen, and those that are higher
-    // resolution than required, or lower res than required but not the base layer, so the base layer is always present.
+    // Load tiles of the correct sample size that are on screen. Discard tiles off screen,
+    // and those that are higher resolution than required, or lower res than required but
+    // not the base layer, so the base layer is always present.
     for ((_, tiles) in tileMap) {
       for (tile in tiles) {
-        if (tile.sampleSize < sampleSize || tile.sampleSize > sampleSize && tile.sampleSize != fullImageSampleSize) {
+        val tileSampleSize = tile.sampleSize
+
+        if (tileSampleSize != currentSampleSize && tileSampleSize != fullImageSampleSize) {
           tile.visible = false
           tile.recycle()
         }
 
-        if (tile.sampleSize == sampleSize) {
+        if (tileSampleSize == currentSampleSize) {
           if (tileVisible(tile)) {
             tile.visible = true
 
-            if (!tile.isLoading && !tile.isLoaded && load) {
+            if (load && tile.canLoad) {
               tilesToLoad += tile
             }
-          } else if (tile.sampleSize != fullImageSampleSize) {
+          } else if (tileSampleSize != fullImageSampleSize) {
             tile.visible = false
             tile.recycle()
           }
-        } else if (tile.sampleSize == fullImageSampleSize) {
+        } else if (tileSampleSize == fullImageSampleSize) {
           tile.visible = true
         }
       }
     }
 
-    if (debug) {
-      logcat { "tilesToLoadCount=${tilesToLoad.size}" }
-    }
-
-    loadTiles(
-      baseGrid = tilesToLoad,
+    val loadTilesResult = loadTiles(
+      tilesToLoad = tilesToLoad,
       eventListener = null
     )
+
+    if (loadTilesResult.isFailure) {
+      tilesToLoad.forEach { tile -> tile.onTileLoadError(loadTilesResult.exceptionOrThrow()) }
+    }
+
+    return loadTilesResult
   }
 
   private fun tileVisible(tile: Tile): Boolean {
@@ -431,11 +491,11 @@ class ComposeSubsamplingScaleImageState(
     return (vy - screenTranslate.y) / scaleState.value
   }
 
-  private fun sourceToViewX(sx: Float): Float {
+  fun sourceToViewX(sx: Float): Float {
     return sx * scaleState.value + screenTranslate.x
   }
 
-  private fun sourceToViewY(sy: Float): Float {
+  fun sourceToViewY(sy: Float): Float {
     return sy * scaleState.value + screenTranslate.y
   }
 
@@ -513,7 +573,7 @@ class ComposeSubsamplingScaleImageState(
 
       for (x in 0 until xTiles) {
         for (y in 0 until yTiles) {
-          val tile = Tile()
+          val tile = Tile(x, y)
           tile.sampleSize = sampleSize
           tile.visible = sampleSize == fullImageSampleSize
 
@@ -666,7 +726,7 @@ class ComposeSubsamplingScaleImageState(
     return averageDpi / dpi
   }
 
-  private fun calculateMinScale(): Float {
+  fun calculateMinScale(): Float {
     // TODO(KurobaEx): paddings
     val hPadding = 0
     val vPadding = 0
@@ -710,15 +770,6 @@ class ComposeSubsamplingScaleImageState(
     }
   }
 
-  internal fun sourceToViewRect(source: RectMut, target: RectMut) {
-    target.set(
-      sourceToViewX(source.left.toFloat()).toInt(),
-      sourceToViewY(source.top.toFloat()).toInt(),
-      sourceToViewX(source.right.toFloat()).toInt(),
-      sourceToViewY(source.bottom.toFloat()).toInt()
-    )
-  }
-
   private fun getResources(): Resources = context.resources
 
   @SuppressLint("LongLogTag")
@@ -749,6 +800,47 @@ class ComposeSubsamplingScaleImageState(
     }
 
     Log.e(TAG, msg)
+  }
+
+  internal fun sourceToViewRect(source: RectMut, target: RectMut) {
+    target.set(
+      sourceToViewX(source.left.toFloat()).toInt(),
+      sourceToViewY(source.top.toFloat()).toInt(),
+      sourceToViewX(source.right.toFloat()).toInt(),
+      sourceToViewY(source.bottom.toFloat()).toInt()
+    )
+  }
+
+  fun getCenter(): PointF {
+    val mX: Int = availableWidth / 2
+    val mY: Int = availableHeight / 2
+    return viewToSourceCoord(mX.toFloat(), mY.toFloat())
+  }
+
+  fun viewToSourceCoord(vx: Float, vy: Float): PointF {
+    return viewToSourceCoord(vx, vy, PointF())
+  }
+
+  fun viewToSourceCoord(vxy: PointF): PointF {
+    return viewToSourceCoord(vxy.x, vxy.y, PointF())
+  }
+
+  fun viewToSourceCoord(vx: Float, vy: Float, sTarget: PointF): PointF {
+    sTarget.set(viewToSourceX(vx), viewToSourceY(vy))
+    return sTarget
+  }
+
+  fun sourceToViewCoord(sxy: PointF): PointF {
+    return sourceToViewCoord(sxy.x, sxy.y, PointF())
+  }
+
+  fun sourceToViewCoord(sx: Float, sy: Float): PointF {
+    return sourceToViewCoord(sx, sy, PointF())
+  }
+
+  fun sourceToViewCoord(sx: Float, sy: Float, vTarget: PointF): PointF {
+    vTarget.set(sourceToViewX(sx), sourceToViewY(sy))
+    return vTarget
   }
 
   companion object {
