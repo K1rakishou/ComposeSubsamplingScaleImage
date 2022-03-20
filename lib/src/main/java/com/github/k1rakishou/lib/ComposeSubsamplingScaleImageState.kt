@@ -18,6 +18,7 @@ import com.github.k1rakishou.lib.helpers.Try
 import com.github.k1rakishou.lib.helpers.asLog
 import com.github.k1rakishou.lib.helpers.errorMessageOrClassName
 import com.github.k1rakishou.lib.helpers.exceptionOrThrow
+import com.github.k1rakishou.lib.helpers.power
 import com.github.k1rakishou.lib.helpers.unwrap
 import java.io.InputStream
 import java.util.concurrent.atomic.AtomicInteger
@@ -25,6 +26,7 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
@@ -53,12 +55,15 @@ class ComposeSubsamplingScaleImageState(
 
   @GuardedBy("this")
   private val currentLoadTileJobs = mutableListOf<Job>()
+  @GuardedBy("this")
+  private var currentRefreshTilesJob: Job? = null
 
   private val defaultMaxScale = 2f
   internal val tileMap = LinkedHashMap<Int, MutableList<Tile>>()
   private val minTileDpi by lazy { minTileDpi() }
   val minScale by lazy { calculateMinScale() }
   val maxScale by lazy { calculateMaxScale(minTileDpi) }
+  val doubleTapZoomScale by lazy { calculateDoubleTapZoomScale(minTileDpi) }
 
   private var satTemp = ScaleAndTranslate()
   private var needInitScreenTranslate = true
@@ -138,6 +143,12 @@ class ComposeSubsamplingScaleImageState(
     subsamplingImageDecoder.getAndSet(null)?.recycle()
     needInitScreenTranslate = true
     initializationState.value = InitializationState.Uninitialized
+  }
+
+  private fun calculateDoubleTapZoomScale(dpi: Int): Float {
+    val metrics = getResources().displayMetrics
+    val averageDpi = (metrics.xdpi + metrics.ydpi) / 2
+    return averageDpi / dpi.toFloat()
   }
 
   private fun minTileDpi(): Int {
@@ -266,10 +277,12 @@ class ComposeSubsamplingScaleImageState(
     for ((key, value) in tileMap.entries) {
       if (key == sampleSize) {
         for (tile in value) {
-          if (tile.visible && !tile.isLoaded) {
+          if (tileVisible(tile) && !tile.isLoaded) {
             hasMissingTiles = true
           }
         }
+
+        break
       }
     }
 
@@ -324,13 +337,10 @@ class ComposeSubsamplingScaleImageState(
 
     coroutineScope {
       tilesToLoad.forEachIndexed { index, tile ->
-        val threadName = Thread.currentThread().name
-
         if (!tile.updateStateAsLoading()) {
           // Skip already loaded
-          logcat {
-            "loadTiles($index, ${threadName}) skipping already loaded tile " +
-              "bounds: ${tile.fileSourceRect}...done"
+          if (debug) {
+            logcat { "loadTiles($index) skipping already loaded tile at ${tile.xy}" }
           }
 
           return@forEachIndexed
@@ -338,6 +348,7 @@ class ComposeSubsamplingScaleImageState(
 
         val newJob = coroutineScope.launch {
           BackgroundUtils.ensureBackgroundThread()
+          val threadName = Thread.currentThread().name
 
           try {
             if (debug) {
@@ -394,20 +405,36 @@ class ComposeSubsamplingScaleImageState(
     return Result.success(Unit)
   }
 
-  fun refreshRequiredTiles() {
-    coroutineScope.launch {
-      val imageDimensions = sourceImageDimensions
-        ?: return@launch
+  fun refreshRequiredTiles(load: Boolean) {
+    BackgroundUtils.ensureMainThread()
 
-      val refreshTilesResult = refreshRequiredTilesInternal(
-        load = eagerTileLoadingEnabled,
-        sourceWidth = imageDimensions.width,
-        sourceHeight = imageDimensions.height,
-        fullImageSampleSize = fullImageSampleSizeState.value,
-        scale = scaleState.value
-      )
+    if (currentRefreshTilesJob != null && !load) {
+      return
+    }
 
-      // Do nothing?
+    currentRefreshTilesJob?.cancel()
+    currentRefreshTilesJob = coroutineScope.launch(Dispatchers.Main.immediate) {
+      try {
+        val imageDimensions = sourceImageDimensions
+          ?: return@launch
+
+        val refreshTilesResult = refreshRequiredTilesInternal(
+          load = load,
+          sourceWidth = imageDimensions.width,
+          sourceHeight = imageDimensions.height,
+          fullImageSampleSize = fullImageSampleSizeState.value,
+          scale = scaleState.value
+        )
+
+        if (refreshTilesResult.isFailure && debug) {
+          logcatError {
+            val errorMessage = refreshTilesResult.exceptionOrThrow().errorMessageOrClassName()
+            "refreshRequiredTilesInternal() error: $errorMessage"
+          }
+        }
+      } finally {
+        currentRefreshTilesJob = null
+      }
     }
   }
 
@@ -418,6 +445,8 @@ class ComposeSubsamplingScaleImageState(
     fullImageSampleSize: Int,
     scale: Float
   ): Result<Unit> {
+    BackgroundUtils.ensureMainThread()
+
     val currentSampleSize = Math.min(
       fullImageSampleSize,
       calculateInSampleSize(
@@ -523,12 +552,7 @@ class ComposeSubsamplingScaleImageState(
       inSampleSize = if (heightRatio < widthRatio) heightRatio else widthRatio
     }
 
-    var power = 1
-    while (power * 2 < inSampleSize) {
-      power *= 2
-    }
-
-    return power
+    return inSampleSize.power()
   }
 
   private fun initialiseTileMap(
@@ -627,17 +651,6 @@ class ComposeSubsamplingScaleImageState(
         )
       )
     }
-  }
-
-  private fun vTranslateForSCenter(sCenterX: Float, sCenterY: Float, scale: Float): PointF {
-    val vxCenter: Int = availableWidth / 2
-    val vyCenter: Int = availableHeight / 2
-
-    satTemp.scale = scale
-    satTemp.screenTranslate.set(vxCenter - sCenterX * scale, vyCenter - sCenterY * scale)
-
-    fitToBounds(true, satTemp)
-    return satTemp.screenTranslate
   }
 
   private fun fitToBounds(shouldCenter: Boolean, sat: ScaleAndTranslate) {
@@ -841,6 +854,58 @@ class ComposeSubsamplingScaleImageState(
   fun sourceToViewCoord(sx: Float, sy: Float, vTarget: PointF): PointF {
     vTarget.set(sourceToViewX(sx), sourceToViewY(sy))
     return vTarget
+  }
+
+  fun limitedSCenter(
+    sCenterX: Float,
+    sCenterY: Float,
+    scale: Float,
+    sTarget: PointF
+  ): PointF {
+    val vTranslate = vTranslateForSCenter(sCenterX, sCenterY, scale)
+
+    val vxCenter: Int = availableWidth / 2
+    val vyCenter: Int = availableHeight / 2
+
+    val sx = (vxCenter - vTranslate.x) / scale
+    val sy = (vyCenter - vTranslate.y) / scale
+    sTarget[sx] = sy
+    return sTarget
+  }
+
+  fun vTranslateForSCenter(sCenterX: Float, sCenterY: Float, scale: Float): PointF {
+    val vxCenter: Int = availableWidth / 2
+    val vyCenter: Int = availableHeight / 2
+
+    satTemp.scale = scale
+    satTemp.screenTranslate.set(vxCenter - sCenterX * scale, vyCenter - sCenterY * scale)
+
+    fitToBounds(true, satTemp)
+    return satTemp.screenTranslate
+  }
+
+  fun ease(easing: ZoomGestureDetector.Easing, time: Long, from: Float, change: Float, duration: Long): Float {
+    return when (easing) {
+      ZoomGestureDetector.Easing.EaseInOutQuad -> easeInOutQuad(time, from, change, duration)
+      ZoomGestureDetector.Easing.EaseOutQuad -> easeOutQuad(time, from, change, duration)
+      else -> throw java.lang.IllegalStateException("Unexpected easing type: $easing")
+    }
+  }
+
+  private fun easeOutQuad(time: Long, from: Float, change: Float, duration: Long): Float {
+    val progress = time.toFloat() / duration.toFloat()
+    return -change * progress * (progress - 2) + from
+  }
+
+  private fun easeInOutQuad(time: Long, from: Float, change: Float, duration: Long): Float {
+    var timeF = time / (duration / 2f)
+
+    if (timeF < 1) {
+      return change / 2f * timeF * timeF + from
+    }
+
+    timeF--
+    return -change / 2f * (timeF * (timeF - 2) - 1) + from
   }
 
   companion object {

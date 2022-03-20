@@ -62,3 +62,12 @@ fun Throwable.errorMessageOrClassName(): String {
 
   return this::class.java.name
 }
+
+internal fun Int.power(): Int {
+  var power = 1
+  while ((power * 2) < this) {
+    power *= 2
+  }
+
+  return power
+}

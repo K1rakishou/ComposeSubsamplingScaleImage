@@ -41,6 +41,17 @@ private val defaultDecoderDispatcher = lazy {
     .asCoroutineDispatcher()
 }
 
+private val tileDebugColors by lazy {
+  arrayOf(
+    Color.Blue,
+    Color.Cyan,
+    Color.Green,
+    Color.Yellow,
+    Color.Red,
+    Color.Magenta,
+  )
+}
+
 @Composable
 fun rememberComposeSubsamplingScaleImageState(
   minTileDpiDefault: Int = 320,
@@ -99,7 +110,7 @@ fun ComposeSubsamplingScaleImage(
 
   val density = LocalDensity.current
   val debugValues = remember { DebugValues(density) }
-  val zoomGesture = remember { ZoomGesture(density, state) }
+  val zoomGesture = remember { ZoomGestureDetector(density, state) }
 
   BoxWithConstraints(
     modifier = Modifier
@@ -225,74 +236,101 @@ private fun DrawScope.DrawTileGrid(
     )
   )
 
-  val hasMissingTiles = state.hasMissingTiles(sampleSize)
+  val bestSampleSize = getBestSampleSize(
+    startSampleSize = sampleSize,
+    state = state
+  )
 
-  for ((key, tiles) in tileMap.entries) {
-    if (key != sampleSize && !hasMissingTiles) {
-      continue
-    }
+  val tileLayer = tileMap.get(bestSampleSize)
+    ?: error("TileMap has no layer at sample size: $bestSampleSize")
+  val index = tileMap.entries.indexOfFirst { it.key == bestSampleSize }
 
-    for (tile in tiles) {
-      val tileState = tile.tileState
+  for (tile in tileLayer) {
+    val tileState = tile.tileState
 
-      state.sourceToViewRect(
-        source = tile.sourceRect,
-        target = tile.screenRect
-      )
+    state.sourceToViewRect(
+      source = tile.sourceRect,
+      target = tile.screenRect
+    )
 
-      if (tileState is TileState.Loaded) {
-        val bitmap = tileState.bitmap
-        bitmapMatrix.reset()
+    if (tileState is TileState.Loaded) {
+      val bitmap = tileState.bitmap
+      bitmapMatrix.reset()
 
-        state.srcArray[0] = 0f                                // top_left.x
-        state.srcArray[1] = 0f                                // top_left.y
-        state.srcArray[2] = bitmap.width.toFloat()            // top_right.x
-        state.srcArray[3] = 0f                                // top_right.y
-        state.srcArray[4] = 0f                                // bottom_left.x
-        state.srcArray[5] = bitmap.height.toFloat()           // bottom_left.y
-        state.srcArray[6] = bitmap.width.toFloat()            // bottom_right.x
-        state.srcArray[7] = bitmap.height.toFloat()           // bottom_right.y
+      state.srcArray[0] = 0f                                // top_left.x
+      state.srcArray[1] = 0f                                // top_left.y
+      state.srcArray[2] = bitmap.width.toFloat()            // top_right.x
+      state.srcArray[3] = 0f                                // top_right.y
+      state.srcArray[4] = 0f                                // bottom_left.x
+      state.srcArray[5] = bitmap.height.toFloat()           // bottom_left.y
+      state.srcArray[6] = bitmap.width.toFloat()            // bottom_right.x
+      state.srcArray[7] = bitmap.height.toFloat()           // bottom_right.y
 
-        state.dstArray[0] = tile.screenRect.left.toFloat()    // top_left.x
-        state.dstArray[1] = tile.screenRect.top.toFloat()     // top_left.y
-        state.dstArray[2] = tile.screenRect.right.toFloat()   // top_right.x
-        state.dstArray[3] = tile.screenRect.top.toFloat()     // top_right.y
-        state.dstArray[4] = tile.screenRect.left.toFloat()    // bottom_left.x
-        state.dstArray[5] = tile.screenRect.bottom.toFloat()  // bottom_left.y
-        state.dstArray[6] = tile.screenRect.right.toFloat()   // bottom_right.x
-        state.dstArray[7] = tile.screenRect.bottom.toFloat()  // bottom_right.y
+      state.dstArray[0] = tile.screenRect.left.toFloat()    // top_left.x
+      state.dstArray[1] = tile.screenRect.top.toFloat()     // top_left.y
+      state.dstArray[2] = tile.screenRect.right.toFloat()   // top_right.x
+      state.dstArray[3] = tile.screenRect.top.toFloat()     // top_right.y
+      state.dstArray[4] = tile.screenRect.left.toFloat()    // bottom_left.x
+      state.dstArray[5] = tile.screenRect.bottom.toFloat()  // bottom_left.y
+      state.dstArray[6] = tile.screenRect.right.toFloat()   // bottom_right.x
+      state.dstArray[7] = tile.screenRect.bottom.toFloat()  // bottom_right.y
 
-        bitmapMatrix.setPolyToPoly(state.srcArray, 0, state.dstArray, 0, 4)
-        nativeCanvas.drawBitmap(bitmap, bitmapMatrix, bitmapPaint)
-
-        if (state.debug) {
-          drawRect(
-            color = Color.Red.copy(alpha = 0.15f),
-            topLeft = tile.screenRect.topLeft,
-            size = tile.screenRect.size
-          )
-          drawRect(
-            color = Color.Red,
-            topLeft = tile.screenRect.topLeft,
-            size = tile.screenRect.size,
-            style = Stroke(width = borderWidthPx)
-          )
-        }
-      }
+      bitmapMatrix.setPolyToPoly(state.srcArray, 0, state.dstArray, 0, 4)
+      nativeCanvas.drawBitmap(bitmap, bitmapMatrix, bitmapPaint)
 
       if (state.debug) {
-        drawTileDebugInfo(
-          tile = tile,
-          nativeCanvas = nativeCanvas,
-          debugTextPaint = debugTextPaint
+        val color = tileDebugColors.getOrNull(index)
+          ?: tileDebugColors.last()
+
+        drawRect(
+          color = color.copy(alpha = 0.15f),
+          topLeft = tile.screenRect.topLeft,
+          size = tile.screenRect.size
+        )
+        drawRect(
+          color = color,
+          topLeft = tile.screenRect.topLeft,
+          size = tile.screenRect.size,
+          style = Stroke(width = borderWidthPx)
         )
       }
+    }
+
+    if (state.debug) {
+      drawTileDebugInfo(
+        tile = tile,
+        nativeCanvas = nativeCanvas,
+        debugTextPaint = debugTextPaint
+      )
     }
   }
 
   if (state.debug) {
     drawDebugInfo(state, nativeCanvas, debugTextPaint)
   }
+}
+
+private fun getBestSampleSize(
+  startSampleSize: Int,
+  state: ComposeSubsamplingScaleImageState
+): Int {
+  var bestSampleSize = startSampleSize
+  val baseSampleSize = state.fullImageSampleSizeState.value
+
+  while (true) {
+    if (bestSampleSize >= baseSampleSize) {
+      return baseSampleSize
+    }
+
+    if (state.hasMissingTiles(bestSampleSize)) {
+      bestSampleSize *= 2
+      continue
+    }
+
+    break
+  }
+
+  return bestSampleSize
 }
 
 private fun DrawScope.drawDebugInfo(
@@ -320,7 +358,7 @@ private fun DrawScope.drawDebugInfo(
     debugTextPaint
   )
 
-  val center: PointF = state.getCenter()
+  val center = state.getCenter()
 
   nativeCanvas.drawText(
     formatSourceCenterText(center),
@@ -410,7 +448,7 @@ private fun formatSourceCenterText(center: PointF): String {
   return buildString {
     append("Source center: ")
     append(String.format(Locale.ENGLISH, "%.2f", center.x))
-    append(":")
+    append("; ")
     append(String.format(Locale.ENGLISH, "%.2f", center.y))
   }
 }
@@ -422,7 +460,7 @@ private fun formatTranslateText(
   return buildString {
     append("Translate: ")
     append(String.format(Locale.ENGLISH, "%.2f", screenTranslateX.toFloat()))
-    append(":")
+    append("; ")
     append(String.format(Locale.ENGLISH, "%.2f", screenTranslateY.toFloat()))
   }
 }

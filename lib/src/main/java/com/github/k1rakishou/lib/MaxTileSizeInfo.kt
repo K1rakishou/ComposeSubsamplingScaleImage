@@ -12,7 +12,7 @@ sealed class MaxTileSizeInfo(
   val height: Int
     get() = maxTileSizeState.value!!.height
 
-  // May crash if the canvas doesn't support width/height
+  // May crash if the canvas doesn't support one of the sizes (width/height)
   class Fixed(
     size: IntSize = IntSize(2048, 2048)
   ) : MaxTileSizeInfo(mutableStateOf(size))

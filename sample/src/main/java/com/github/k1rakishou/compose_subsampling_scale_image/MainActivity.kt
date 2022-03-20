@@ -105,8 +105,9 @@ class MainActivity : ComponentActivity() {
       modifier = Modifier.fillMaxSize(),
       state = rememberComposeSubsamplingScaleImageState(
         minTileDpiDefault = 0,
-        maxMaxTileSizeInfo = { MaxTileSizeInfo.Auto() },
+        maxMaxTileSizeInfo = { MaxTileSizeInfo.Fixed(IntSize(2048, 2048)) },
         minimumScaleType = { MinimumScaleType.ScaleTypeCenterInside },
+        maxScale = 5f,
         decoderDispatcherLazy = decoderDispatcherLazy,
         debugKey = imageFileName,
         debug = true

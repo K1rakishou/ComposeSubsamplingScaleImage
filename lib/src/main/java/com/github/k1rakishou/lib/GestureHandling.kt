@@ -1,6 +1,7 @@
 package com.github.k1rakishou.lib
 
 import android.graphics.PointF
+import android.os.SystemClock
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.forEachGesture
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -23,17 +24,23 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastAll
+import androidx.compose.ui.util.fastForEach
+import com.github.k1rakishou.lib.helpers.errorMessageOrClassName
 import com.github.k1rakishou.lib.helpers.logcat
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-private const val TAG = "SubsamplingScaleImageGestureHandling"
+private const val TAG = "ComposeSubsamplingScaleImageGestures"
 
 fun Modifier.composeSubsamplingScaleImageGestureDetector(
-  zoomGesture: ZoomGesture? = null
+  zoomGesture: ZoomGestureDetector? = null
 ) = composed(
   inspectorInfo = {
     name = "composeSubsamplingScaleImageGestureDetector"
@@ -49,9 +56,9 @@ fun Modifier.composeSubsamplingScaleImageGestureDetector(
 )
 
 private suspend fun PointerInputScope.processGestures(
-  zoomGesture: ZoomGesture? = null
+  zoomGesture: ZoomGestureDetector? = null
 ) {
-  val activeDetectors = arrayOfNulls<Job?>(Detector.values().size)
+  val activeDetectors = arrayOfNulls<Job?>(DetectorType.values().size)
 
   forEachGesture {
     activeDetectors.forEachIndexed { index, job ->
@@ -64,16 +71,21 @@ private suspend fun PointerInputScope.processGestures(
       // TODO(KurobaEx): detect horizontal/vertical touch slop
       // TODO(KurobaEx): continue with the gesture or stop consuming horizontal/vertical scroll in Horizontal/Vertical Pager
 
-      activeDetectors[Detector.Zoom.index] = launch {
-        detectZoomGestures(zoomGesture, this)
+      activeDetectors[DetectorType.Zoom.index] = launch {
+        detectZoomGestures(
+          zoomGesture = zoomGesture,
+          coroutineScope = this,
+          gesturesLocked = { zoomGesture?.animating ?: false }
+        )
       }
     }
   }
 }
 
 private suspend fun PointerInputScope.detectZoomGestures(
-  zoomGesture: ZoomGesture?,
-  coroutineScope: CoroutineScope
+  zoomGesture: ZoomGestureDetector?,
+  coroutineScope: CoroutineScope,
+  gesturesLocked: () -> Boolean
 ) {
   awaitPointerEventScope {
     val firstDown = awaitFirstDownOnPass(
@@ -83,6 +95,32 @@ private suspend fun PointerInputScope.detectZoomGestures(
 
     if (zoomGesture == null) {
       return@awaitPointerEventScope
+    }
+
+    zoomGesture.cancelAnimation()
+
+    if (gesturesLocked()) {
+      if (zoomGesture.debug) {
+        logcat(tag = TAG) { "Gestures locked" }
+      }
+
+      firstDown.consumeAllChanges()
+
+      while (coroutineScope.isActive && gesturesLocked()) {
+        val event = awaitPointerEvent(pass = PointerEventPass.Main)
+
+        if (event.changes.fastAll { it.changedToUpIgnoreConsumed() }) {
+          break
+        }
+
+        event.changes.fastForEach { it.consumeAllChanges() }
+      }
+
+      return@awaitPointerEventScope
+    }
+
+    if (zoomGesture.debug) {
+      logcat(tag = TAG) { "Gestures NOT locked" }
     }
 
     val firstUpOrCancel = waitForUpOrCancellation()
@@ -95,7 +133,7 @@ private suspend fun PointerInputScope.detectZoomGestures(
     var lastPosition: Offset = secondDown.position
 
     try {
-      zoomGesture.onZoomStarted(secondDown.position)
+      zoomGesture.onGestureStarted(secondDown.position)
 
       while (coroutineScope.isActive) {
         val pointerEvent = awaitPointerEvent(pass = PointerEventPass.Main)
@@ -107,12 +145,12 @@ private suspend fun PointerInputScope.detectZoomGestures(
           break
         }
 
-        zoomGesture.onZooming(pointerInputChange.position)
+        zoomGesture.onGestureUpdated(pointerInputChange.position)
         pointerInputChange.consumeAllChanges()
         lastPosition = pointerInputChange.position
       }
     } finally {
-      zoomGesture.onZoomEnded(lastPosition)
+      zoomGesture.onGestureEnded(lastPosition)
     }
   }
 }
@@ -147,14 +185,115 @@ private suspend fun AwaitPointerEventScope.awaitSecondDown(
   return@withTimeoutOrNull change
 }
 
-enum class Detector(val index: Int) {
+enum class DetectorType(val index: Int) {
   Zoom(0)
 }
 
-class ZoomGesture(
-  private val density: Density,
-  private val state: ComposeSubsamplingScaleImageState
+abstract class GestureDetector(
+  val detectorType: DetectorType
 ) {
+  protected var currentAnimation: Animation<*>? = null
+
+  val animating: Boolean
+    get() = currentAnimation?.animating ?: false
+
+  fun cancelAnimation() {
+    val canceled = currentAnimation?.cancel() == true
+    if (canceled) {
+      currentAnimation = null
+    }
+  }
+
+  abstract fun onGestureStarted(offset: Offset)
+  abstract fun onGestureUpdated(offset: Offset)
+  abstract fun onGestureEnded(offset: Offset)
+}
+
+class Animation<Params>(
+  val debug: Boolean,
+  val coroutineScope: CoroutineScope,
+  val canBeCanceled: Boolean,
+  val durationMs: Int,
+  val animationParams: () -> Params,
+  val animation: suspend (Params, Float, Long) -> Unit,
+  val onAnimationEnd: () -> Unit
+) {
+  private var animationJob: Job? = null
+
+  val animating: Boolean
+    get() = animationJob != null
+
+  fun start() {
+    if (debug) {
+      logcat(tag = TAG) { "Animation start()" }
+    }
+
+    animationJob?.cancel()
+    animationJob = coroutineScope.launch {
+      val job = coroutineContext[Job]!!
+
+      job.invokeOnCompletion { cause ->
+        if (debug) {
+          logcat(tag = TAG) { "Animation OnCompletion, cause=${cause?.errorMessageOrClassName()}" }
+        }
+
+        onAnimationEnd()
+      }
+
+      val startTime = SystemClock.elapsedRealtime()
+      val params = animationParams()
+      var progress = 0f
+
+      try {
+        while (job.isActive) {
+          job.ensureActive()
+
+          animation(params, progress, durationMs.toLong())
+          delay(16L)
+
+          if (progress >= 1f) {
+            break
+          }
+
+          val timePassed = SystemClock.elapsedRealtime() - startTime
+          progress = timePassed.toFloat() / durationMs.toFloat()
+
+          if (progress > 1f) {
+            progress = 1f
+          }
+        }
+      } finally {
+        if (progress < 1f) {
+          animation(params, 1f, durationMs.toLong())
+        }
+
+        animationJob = null
+      }
+    }
+  }
+
+  fun cancel(): Boolean {
+    if (debug) {
+      logcat(tag = TAG) { "Animation cancel() canBeCanceled=$canBeCanceled" }
+    }
+
+    if (canBeCanceled) {
+      animationJob?.cancel()
+      animationJob = null
+
+      return true
+    }
+
+    return false
+  }
+}
+
+class ZoomGestureDetector(
+  private val density: Density,
+  private val state: ComposeSubsamplingScaleImageState,
+) : GestureDetector(DetectorType.Zoom) {
+  val debug = state.debug
+
   private val quickScaleThreshold = with(density) { 20.dp.toPx() }
 
   // vCenterStart
@@ -174,8 +313,35 @@ class ZoomGesture(
   private var isZooming = false
   private var quickScaleMoved = false
   private var quickScaleLastDistance = 0f
+  private var animatingQuickZoom = false
 
-  fun onZoomStarted(offset: Offset) {
+  private var coroutineScope: CoroutineScope? = null
+
+  enum class Easing {
+    EaseOutQuad,
+    EaseInOutQuad
+  }
+
+  data class QuickZoomAnimationParameters(
+    val easing: Easing,
+    val startTime: Long,
+    val startScale: Float,
+    val endScale: Float,
+    // sCenter
+    val targetSourceCenter: PointF,
+    // vFocus
+    val screenFocus: PointF,
+
+    val vFocusStart: PointF,
+    val vFocusEnd: PointF,
+
+    val sCenterEnd: PointF
+  )
+
+  override fun onGestureStarted(offset: Offset) {
+    coroutineScope?.cancel()
+    coroutineScope = CoroutineScope(Dispatchers.Main)
+
     val currentScale = state.scaleState.value
     val screenTranslateX = state.screenTranslate.x.toFloat()
     val screenTranslateY = state.screenTranslate.y.toFloat()
@@ -187,6 +353,7 @@ class ZoomGesture(
     scaleStart = currentScale
     isQuickScaling = true
     isZooming = true
+    animatingQuickZoom = false
     quickScaleLastDistance = -1f
     quickScaleSourceCenter.set(state.viewToSourceCoord(screenCenterStart))
     quickScaleScreenStart.set(offset.x, offset.y)
@@ -194,7 +361,18 @@ class ZoomGesture(
     quickScaleMoved = false
   }
 
-  fun onZoomEnded(offset: Offset) {
+  override fun onGestureEnded(offset: Offset) {
+    if (!animatingQuickZoom && !quickScaleMoved && coroutineScope != null) {
+      if (currentAnimation != null) {
+        return
+      }
+
+      animatingQuickZoom = true
+      initAndStartQuickZoomAnimation(debug, offset)
+
+      return
+    }
+
     screenCenterStart.set(0f, 0f)
     screenTranslateStart.set(0f, 0f)
     quickScaleSourceCenter.set(0f, 0f)
@@ -203,11 +381,16 @@ class ZoomGesture(
     scaleStart = 0f
     isQuickScaling = false
     isZooming = false
+    animatingQuickZoom = false
     quickScaleMoved = false
     quickScaleLastDistance = 0f
+    currentAnimation = null
+
+    coroutineScope?.cancel()
+    coroutineScope = null
   }
 
-  fun onZooming(offset: Offset) {
+  override fun onGestureUpdated(offset: Offset) {
     var dist = Math.abs(quickScaleScreenStart.y - offset.y) * 2 + quickScaleThreshold
 
     if (quickScaleLastDistance == -1f) {
@@ -249,7 +432,6 @@ class ZoomGesture(
       ) {
         state.fitToBounds(true)
         screenCenterStart.set(state.sourceToViewCoord(quickScaleSourceCenter))
-        logcat(tag = TAG) { "quickScaleSourceCenter=$quickScaleSourceCenter, vCenterStart=$screenCenterStart" }
 
         screenTranslateStart.set(state.screenTranslate.x.toFloat(), state.screenTranslate.y.toFloat())
         scaleStart = newScale
@@ -258,15 +440,12 @@ class ZoomGesture(
     }
 
     quickScaleLastDistance = dist
-
     state.fitToBounds(true)
-
-    // TODO(KurobaEx): Use debouncing here? Since onZooming will be called on each finger move.
-    state.refreshRequiredTiles()
+    state.refreshRequiredTiles(load = true)
   }
 
   fun debugDraw(drawScope: DrawScope) {
-    val style = Stroke(width = 4f)
+    val style = Stroke(width = 8f)
 
     with(drawScope) {
       if (screenCenterStart.x > 0f || screenCenterStart.y > 0f) {
@@ -299,6 +478,96 @@ class ZoomGesture(
         )
       }
     }
+  }
+
+  private fun initAndStartQuickZoomAnimation(debug: Boolean, offset: Offset) {
+    val vTranslateBefore = PointF(0f, 0f)
+
+    currentAnimation = Animation<QuickZoomAnimationParameters>(
+      debug = debug,
+      coroutineScope = coroutineScope!!,
+      canBeCanceled = true,
+      durationMs = 250,
+      animationParams = {
+        val currentScale = state.currentScale
+        val minScale = state.minScale
+        val doubleTapZoomScale = Math.min(state.maxScale, state.doubleTapZoomScale)
+
+        val zoomIn = currentScale <= doubleTapZoomScale * 0.9 || currentScale == minScale
+        val endScale = if (zoomIn) doubleTapZoomScale else minScale
+
+        val targetSCenter = state.limitedSCenter(
+          sCenterX = this.quickScaleSourceCenter.x,
+          sCenterY = this.quickScaleSourceCenter.y,
+          scale = endScale,
+          sTarget = PointF()
+        )
+
+        val vxCenter = state.availableWidth / 2f
+        val vyCenter = state.availableHeight / 2f
+
+        val vFocusStart = state.sourceToViewCoord(targetSCenter)
+        val vFocusEnd = PointF(vxCenter, vyCenter)
+
+        return@Animation QuickZoomAnimationParameters(
+          easing = Easing.EaseInOutQuad,
+          startTime = SystemClock.elapsedRealtime(),
+          startScale = currentScale,
+          endScale = endScale,
+          targetSourceCenter = quickScaleSourceCenter,
+          screenFocus = quickScaleScreenStart,
+          vFocusStart = vFocusStart,
+          vFocusEnd = vFocusEnd,
+          sCenterEnd = targetSCenter
+        )
+      },
+      animation = { params: QuickZoomAnimationParameters, _: Float, duration: Long ->
+        val startScale = params.startScale
+        val endScale = params.endScale
+        vTranslateBefore.set(state.screenTranslate.x.toFloat(), state.screenTranslate.y.toFloat())
+
+        var scaleElapsed = SystemClock.elapsedRealtime() - params.startTime
+        val finished = scaleElapsed > duration
+        scaleElapsed = Math.min(scaleElapsed, duration)
+
+        val newScale = state.ease(
+          easing = params.easing,
+          time = scaleElapsed,
+          from = startScale,
+          change = endScale - startScale,
+          duration = duration
+        )
+
+        state.scaleState.value = newScale
+
+        val vFocusNowX = state.ease(
+          easing = params.easing,
+          time = scaleElapsed,
+          from = params.vFocusStart.x,
+          change = params.vFocusEnd.x - params.vFocusStart.x,
+          duration = duration
+        )
+        val vFocusNowY = state.ease(
+          easing = params.easing,
+          time = scaleElapsed,
+          from = params.vFocusStart.y,
+          change = params.vFocusEnd.y - params.vFocusStart.y,
+          duration = duration
+        )
+
+        state.screenTranslate.xState.value -= (state.sourceToViewX(params.sCenterEnd.x) - vFocusNowX).toInt()
+        state.screenTranslate.yState.value -= (state.sourceToViewY(params.sCenterEnd.y) - vFocusNowY).toInt()
+
+        state.fitToBounds(finished || startScale == endScale)
+        state.refreshRequiredTiles(finished)
+      },
+      onAnimationEnd = {
+        onGestureEnded(offset)
+        animatingQuickZoom = false
+      }
+    )
+
+    currentAnimation!!.start()
   }
 
 }
