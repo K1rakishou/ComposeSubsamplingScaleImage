@@ -6,13 +6,12 @@ import android.content.res.Resources
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.PointF
-import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.util.Log
-import androidx.annotation.GuardedBy
 import androidx.compose.runtime.RememberObserver
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.unit.IntSize
+import com.github.k1rakishou.lib.gestures.GestureAnimationEasing
 import com.github.k1rakishou.lib.helpers.BackgroundUtils
 import com.github.k1rakishou.lib.helpers.Try
 import com.github.k1rakishou.lib.helpers.asLog
@@ -27,7 +26,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
@@ -43,20 +41,20 @@ class ComposeSubsamplingScaleImageState(
   val minimumScaleType: MinimumScaleType,
   val minScaleParam: Float?,
   val maxScaleParam: Float?,
-  val eagerTileLoadingEnabled: Boolean,
   val imageDecoderProvider: ImageDecoderProvider,
   val decoderDispatcherLazy: Lazy<CoroutineDispatcher>,
   val debug: Boolean,
+  val minFlingMoveDistPx: Int,
+  val minFlingVelocityPxPerSecond: Int,
+  val doubleTapGestureMaxAllowedDistanceBetweenTapsPx: Int,
+  val animationUpdateIntervalMs: Long,
+  val zoomAnimationDurationMs: Int,
+  val panFlingAnimationDurationMs: Int,
   private val minTileDpiDefault: Int,
   private val debugKey: String?
 ) : RememberObserver {
   private val decoderDispatcher by decoderDispatcherLazy
   private lateinit var coroutineScope: CoroutineScope
-
-  @GuardedBy("this")
-  private val currentLoadTileJobs = mutableListOf<Job>()
-  @GuardedBy("this")
-  private var currentRefreshTilesJob: Job? = null
 
   private val defaultMaxScale = 2f
   internal val tileMap = LinkedHashMap<Int, MutableList<Tile>>()
@@ -108,6 +106,9 @@ class ComposeSubsamplingScaleImageState(
   val currentScale: Float
     get() = scaleState.value
 
+  val isReady: Boolean
+    get() = initializationState.value is InitializationState.Success
+
   override fun onRemembered() {
     coroutineScope = CoroutineScope(decoderDispatcher)
   }
@@ -126,11 +127,6 @@ class ComposeSubsamplingScaleImageState(
     tileMap.entries.forEach { (_, tiles) -> tiles.forEach { tile -> tile.recycle() } }
     tileMap.clear()
     coroutineScope.cancel()
-
-    synchronized(this) {
-      currentLoadTileJobs.forEach { job -> job.cancel() }
-      currentLoadTileJobs.clear()
-    }
 
     satTemp.reset()
     bitmapMatrix.reset()
@@ -243,9 +239,11 @@ class ComposeSubsamplingScaleImageState(
       }
     }
 
-    val baseGrid = tileMap[fullImageSampleSizeState.value]!!
+    val currentSampleSize = fullImageSampleSizeState.value
+    val baseGrid = tileMap[currentSampleSize]!!
 
     val loadTilesResult = loadTiles(
+      currentSampleSize = currentSampleSize,
       tilesToLoad = baseGrid,
       eventListener = eventListener
     )
@@ -271,24 +269,6 @@ class ComposeSubsamplingScaleImageState(
     return InitializationState.Success
   }
 
-  fun hasMissingTiles(sampleSize: Int): Boolean {
-    var hasMissingTiles = false
-
-    for ((key, value) in tileMap.entries) {
-      if (key == sampleSize) {
-        for (tile in value) {
-          if (tileVisible(tile) && !tile.isLoaded) {
-            hasMissingTiles = true
-          }
-        }
-
-        break
-      }
-    }
-
-    return hasMissingTiles
-  }
-
   private fun decodeImageDimensions(
     inputStream: InputStream
   ): Result<IntSize> {
@@ -303,6 +283,7 @@ class ComposeSubsamplingScaleImageState(
   }
 
   private suspend fun loadTiles(
+    currentSampleSize: Int,
     tilesToLoad: List<Tile>,
     eventListener: ComposeSubsamplingScaleImageEventListener?
   ): Result<Unit> {
@@ -322,37 +303,35 @@ class ComposeSubsamplingScaleImageState(
       return Result.failure(exception)
     }
 
-    val startTime = SystemClock.elapsedRealtime()
-    if (debug) {
-      logcat { "loadTiles() start, tiles=${tilesToLoad.size}" }
-    }
-
     val totalTilesCount = tilesToLoad.size
     val remaining = AtomicInteger(totalTilesCount)
 
-    synchronized(this) {
-      currentLoadTileJobs.forEach { job -> job.cancel() }
-      currentLoadTileJobs.clear()
-    }
-
     coroutineScope {
+      val totalCount = tilesToLoad.size
+
       tilesToLoad.forEachIndexed { index, tile ->
-        if (!tile.updateStateAsLoading()) {
-          // Skip already loaded
-          if (debug) {
-            logcat { "loadTiles($index) skipping already loaded tile at ${tile.xy}" }
-          }
-
-          return@forEachIndexed
-        }
-
-        val newJob = coroutineScope.launch {
+        coroutineScope.launch {
           BackgroundUtils.ensureBackgroundThread()
           val threadName = Thread.currentThread().name
 
           try {
+            if (!tile.updateStateAsLoading()) {
+              // Skip already loaded
+              if (debug) {
+                logcat {
+                  "loadTiles($index/$totalCount, @$currentSampleSize) " +
+                    "skipping already loaded tile at ${tile.xy}"
+                }
+              }
+
+              return@launch
+            }
+
             if (debug) {
-              logcat { "loadTiles($index, ${threadName}) decoding tile at ${tile.xy}" }
+              logcat {
+                "loadTiles($index/$totalCount, @$currentSampleSize, ${threadName}) " +
+                "decoding tile at ${tile.xy}"
+              }
             }
 
             ensureActive()
@@ -369,8 +348,8 @@ class ComposeSubsamplingScaleImageState(
           } catch (error: Throwable) {
             if (debug) {
               logcatError {
-                "loadTiles($index, ${threadName}) Failed to decode tile at ${tile.xy}, " +
-                  "error: ${error.errorMessageOrClassName()}"
+                "loadTiles($index/$totalCount, @$currentSampleSize, ${threadName}) " +
+                  "Failed to decode tile at ${tile.xy}, error: ${error.errorMessageOrClassName()}"
               }
             }
 
@@ -390,16 +369,7 @@ class ComposeSubsamplingScaleImageState(
             invalidate.value = invalidate.value + 1
           }
         }
-
-        synchronized(this) {
-          currentLoadTileJobs += newJob
-        }
       }
-    }
-
-    if (debug) {
-      val timeDiff = SystemClock.elapsedRealtime() - startTime
-      logcat { "loadTiles() end, tiles=${tilesToLoad.size}, took: ${timeDiff}ms" }
     }
 
     return Result.success(Unit)
@@ -408,32 +378,24 @@ class ComposeSubsamplingScaleImageState(
   fun refreshRequiredTiles(load: Boolean) {
     BackgroundUtils.ensureMainThread()
 
-    if (currentRefreshTilesJob != null && !load) {
-      return
-    }
+    coroutineScope.launch(Dispatchers.Main.immediate) {
+      if (!isReady) {
+        return@launch
+      }
 
-    currentRefreshTilesJob?.cancel()
-    currentRefreshTilesJob = coroutineScope.launch(Dispatchers.Main.immediate) {
-      try {
-        val imageDimensions = sourceImageDimensions
-          ?: return@launch
+      val refreshTilesResult = refreshRequiredTilesInternal(
+        load = load,
+        sourceWidth = sourceWidth,
+        sourceHeight = sourceHeight,
+        fullImageSampleSize = fullImageSampleSizeState.value,
+        scale = scaleState.value
+      )
 
-        val refreshTilesResult = refreshRequiredTilesInternal(
-          load = load,
-          sourceWidth = imageDimensions.width,
-          sourceHeight = imageDimensions.height,
-          fullImageSampleSize = fullImageSampleSizeState.value,
-          scale = scaleState.value
-        )
-
-        if (refreshTilesResult.isFailure && debug) {
-          logcatError {
-            val errorMessage = refreshTilesResult.exceptionOrThrow().errorMessageOrClassName()
-            "refreshRequiredTilesInternal() error: $errorMessage"
-          }
+      if (refreshTilesResult.isFailure && debug) {
+        logcatError {
+          val errorMessage = refreshTilesResult.exceptionOrThrow().errorMessageOrClassName()
+          "refreshRequiredTilesInternal() error: $errorMessage"
         }
-      } finally {
-        currentRefreshTilesJob = null
       }
     }
   }
@@ -488,6 +450,7 @@ class ComposeSubsamplingScaleImageState(
     }
 
     val loadTilesResult = loadTiles(
+      currentSampleSize = currentSampleSize,
       tilesToLoad = tilesToLoad,
       eventListener = null
     )
@@ -884,12 +847,34 @@ class ComposeSubsamplingScaleImageState(
     return satTemp.screenTranslate
   }
 
-  fun ease(easing: ZoomGestureDetector.Easing, time: Long, from: Float, change: Float, duration: Long): Float {
-    return when (easing) {
-      ZoomGestureDetector.Easing.EaseInOutQuad -> easeInOutQuad(time, from, change, duration)
-      ZoomGestureDetector.Easing.EaseOutQuad -> easeOutQuad(time, from, change, duration)
-      else -> throw java.lang.IllegalStateException("Unexpected easing type: $easing")
+  fun ease(gestureAnimationEasing: GestureAnimationEasing, time: Long, from: Float, change: Float, duration: Long): Float {
+    return when (gestureAnimationEasing) {
+      GestureAnimationEasing.EaseInOutQuad -> easeInOutQuad(time, from, change, duration)
+      GestureAnimationEasing.EaseOutQuad -> easeOutQuad(time, from, change, duration)
+      else -> throw java.lang.IllegalStateException("Unexpected easing type: $gestureAnimationEasing")
     }
+  }
+
+  fun getPanInfo(
+    horizontalTolerance: Float = PanInfo.DEFAULT_TOLERANCE,
+    verticalTolerance: Float = PanInfo.DEFAULT_TOLERANCE
+  ): PanInfo? {
+    if (!isReady) {
+      return null
+    }
+
+    val scale = scaleState.value
+    val scaleWidth: Float = scale * sourceWidth
+    val scaleHeight: Float = scale * sourceHeight
+
+    return PanInfo(
+      top = Math.max(0f, -screenTranslate.y.toFloat()),
+      left = Math.max(0f, -screenTranslate.x.toFloat()),
+      bottom = Math.max(0f, scaleHeight + screenTranslate.y - availableHeight),
+      right = Math.max(0f, scaleWidth + screenTranslate.x - availableWidth),
+      horizontalTolerance = horizontalTolerance,
+      verticalTolerance = verticalTolerance
+    )
   }
 
   private fun easeOutQuad(time: Long, from: Float, change: Float, duration: Long): Float {

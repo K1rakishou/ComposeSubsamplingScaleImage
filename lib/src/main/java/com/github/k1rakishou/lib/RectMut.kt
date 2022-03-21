@@ -1,5 +1,6 @@
 package com.github.k1rakishou.lib
 
+import android.graphics.RectF
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
@@ -41,8 +42,36 @@ internal data class RectMut(
     return Rect(Offset(left.toFloat(), top.toFloat()), Offset(right.toFloat(), bottom.toFloat()))
   }
 
-  fun toAndroidRect(): android.graphics.Rect {
+  fun toAndroidRect(tempRect: android.graphics.Rect? = null): android.graphics.Rect {
+    if (tempRect != null) {
+      tempRect.set(left, top, right, bottom)
+      return tempRect
+    }
+
     return android.graphics.Rect(left, top, right, bottom)
+  }
+
+  fun toAndroidRectF(tempRectF: RectF? = null): RectF {
+    if (tempRectF != null) {
+      tempRectF.set(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
+      return tempRectF
+    }
+
+    return RectF(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
+  }
+
+  fun intersects(otherLeft: Int, otherTop: Int, otherRight: Int, otherBottom: Int): Boolean {
+    return this.left < otherRight &&
+      otherLeft < this.right &&
+      this.top < otherBottom &&
+      otherTop < this.bottom
+  }
+
+  fun intersects(other: RectMut): Boolean {
+    return this.left < other.right &&
+      other.left < this.right &&
+      this.top < other.bottom &&
+      other.top < this.bottom
   }
 
   private fun onUpdated() {

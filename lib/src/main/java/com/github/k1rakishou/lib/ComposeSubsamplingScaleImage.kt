@@ -1,7 +1,10 @@
 package com.github.k1rakishou.lib
 
+import android.content.Context
 import android.graphics.Paint
 import android.graphics.PointF
+import android.view.ViewConfiguration
+import android.view.WindowManager
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,6 +25,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.github.k1rakishou.lib.gestures.PanGestureDetector
+import com.github.k1rakishou.lib.gestures.ZoomGestureDetector
+import com.github.k1rakishou.lib.gestures.composeSubsamplingScaleImageGestureDetector
+import com.github.k1rakishou.lib.helpers.isAndroid11
 import com.github.k1rakishou.lib.helpers.logcat
 import java.util.Locale
 import java.util.concurrent.Executors
@@ -54,12 +61,18 @@ private val tileDebugColors by lazy {
 
 @Composable
 fun rememberComposeSubsamplingScaleImageState(
+  minFlingMoveDistPx: Int = 50,
+  minFlingVelocityPxPerSecond: Int? = null,
+  // Magic number taken from Jetpack Compose TextSelectionMouseDetector class (See ClicksSlop).
+  // May not be ideal for finger taps.
+  doubleTapGestureMaxAllowedDistanceBetweenTapsPx: Int = 100,
+  zoomAnimationDurationMs: Int = 250,
+  panFlingAnimationDurationMs: Int = 250,
   minTileDpiDefault: Int = 320,
   maxMaxTileSizeInfo: () -> MaxTileSizeInfo = { MaxTileSizeInfo.Auto() },
   minimumScaleType: () -> MinimumScaleType = { MinimumScaleType.ScaleTypeCenterInside },
   minScale: Float? = null,
   maxScale: Float? = null,
-  eagerTileLoadingEnabled: Boolean = true,
   debugKey: String? = null,
   debug: Boolean = false,
   decoderDispatcherLazy: Lazy<CoroutineDispatcher> = defaultDecoderDispatcher,
@@ -68,6 +81,31 @@ fun rememberComposeSubsamplingScaleImageState(
   val context = LocalContext.current
   val maxMaxTileSizeInfoRemembered = remember { maxMaxTileSizeInfo() }
   val minimumScaleTypeRemembered = remember { minimumScaleType() }
+  val androidViewConfiguration = remember { ViewConfiguration.get(context) }
+
+  val minFlingVelocity = remember(key1 = minFlingVelocityPxPerSecond) {
+    if (minFlingVelocityPxPerSecond != null) {
+      return@remember minFlingVelocityPxPerSecond
+    }
+
+    return@remember androidViewConfiguration.scaledMinimumFlingVelocity
+  }
+
+  val animationUpdateIntervalMs = remember {
+    val display = if (isAndroid11()) {
+      context.display
+    } else {
+      (context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)?.defaultDisplay
+    }
+
+    val updateInterval = if (display != null) {
+      1000f / display.refreshRate
+    } else {
+      1000f / 60f
+    }
+
+    return@remember updateInterval.toLong()
+  }
 
   return remember {
     ComposeSubsamplingScaleImageState(
@@ -76,10 +114,15 @@ fun rememberComposeSubsamplingScaleImageState(
       minimumScaleType = minimumScaleTypeRemembered,
       minScaleParam = minScale,
       maxScaleParam = maxScale,
-      eagerTileLoadingEnabled = eagerTileLoadingEnabled,
       imageDecoderProvider = ImageDecoderProvider,
       decoderDispatcherLazy = decoderDispatcherLazy,
       debug = debug,
+      minFlingMoveDistPx = minFlingMoveDistPx,
+      minFlingVelocityPxPerSecond = minFlingVelocity,
+      doubleTapGestureMaxAllowedDistanceBetweenTapsPx = doubleTapGestureMaxAllowedDistanceBetweenTapsPx,
+      animationUpdateIntervalMs = animationUpdateIntervalMs,
+      zoomAnimationDurationMs = zoomAnimationDurationMs,
+      panFlingAnimationDurationMs = panFlingAnimationDurationMs,
       minTileDpiDefault = minTileDpiDefault,
       debugKey = debugKey
     )
@@ -110,13 +153,16 @@ fun ComposeSubsamplingScaleImage(
 
   val density = LocalDensity.current
   val debugValues = remember { DebugValues(density) }
-  val zoomGesture = remember { ZoomGestureDetector(density, state) }
+  val zoomGestureDetector = remember { ZoomGestureDetector(density, state) }
+  val panGestureDetector = remember { PanGestureDetector(density, state) }
 
   BoxWithConstraints(
     modifier = Modifier
       .fillMaxSize()
       .composeSubsamplingScaleImageGestureDetector(
-        zoomGesture = zoomGesture
+        state = state,
+        zoomGestureDetector = zoomGestureDetector,
+        panGestureDetector = panGestureDetector
       )
   ) {
     val minWidthPx = with(density) { remember(key1 = minWidth) { minWidth.toPx().toInt() } }
@@ -160,7 +206,7 @@ fun ComposeSubsamplingScaleImage(
             )
 
             if (state.debug) {
-              zoomGesture.debugDraw(this)
+              zoomGestureDetector.debugDraw(this)
             }
           }
         )
@@ -236,101 +282,92 @@ private fun DrawScope.DrawTileGrid(
     )
   )
 
-  val bestSampleSize = getBestSampleSize(
-    startSampleSize = sampleSize,
-    state = state
-  )
+  // First check for missing tiles - if there are any we need the base layer underneath to avoid gaps
+  var hasMissingTiles = false
+  for ((key, value) in tileMap) {
+    if (key != sampleSize) {
+      continue
+    }
 
-  val tileLayer = tileMap.get(bestSampleSize)
-    ?: error("TileMap has no layer at sample size: $bestSampleSize")
-  val index = tileMap.entries.indexOfFirst { it.key == bestSampleSize }
+    for (tile in value) {
+      if (tile.visible && !tile.isLoaded) {
+        hasMissingTiles = true
+        break
+      }
+    }
+  }
 
-  for (tile in tileLayer) {
-    val tileState = tile.tileState
+  var index = 0
 
-    state.sourceToViewRect(
-      source = tile.sourceRect,
-      target = tile.screenRect
-    )
+  for ((layerSampleSize, tileLayer) in tileMap.entries) {
+    if (layerSampleSize == sampleSize || hasMissingTiles) {
+      for (tile in tileLayer) {
+        val tileState = tile.tileState
 
-    if (tileState is TileState.Loaded) {
-      val bitmap = tileState.bitmap
-      bitmapMatrix.reset()
-
-      state.srcArray[0] = 0f                                // top_left.x
-      state.srcArray[1] = 0f                                // top_left.y
-      state.srcArray[2] = bitmap.width.toFloat()            // top_right.x
-      state.srcArray[3] = 0f                                // top_right.y
-      state.srcArray[4] = 0f                                // bottom_left.x
-      state.srcArray[5] = bitmap.height.toFloat()           // bottom_left.y
-      state.srcArray[6] = bitmap.width.toFloat()            // bottom_right.x
-      state.srcArray[7] = bitmap.height.toFloat()           // bottom_right.y
-
-      state.dstArray[0] = tile.screenRect.left.toFloat()    // top_left.x
-      state.dstArray[1] = tile.screenRect.top.toFloat()     // top_left.y
-      state.dstArray[2] = tile.screenRect.right.toFloat()   // top_right.x
-      state.dstArray[3] = tile.screenRect.top.toFloat()     // top_right.y
-      state.dstArray[4] = tile.screenRect.left.toFloat()    // bottom_left.x
-      state.dstArray[5] = tile.screenRect.bottom.toFloat()  // bottom_left.y
-      state.dstArray[6] = tile.screenRect.right.toFloat()   // bottom_right.x
-      state.dstArray[7] = tile.screenRect.bottom.toFloat()  // bottom_right.y
-
-      bitmapMatrix.setPolyToPoly(state.srcArray, 0, state.dstArray, 0, 4)
-      nativeCanvas.drawBitmap(bitmap, bitmapMatrix, bitmapPaint)
-
-      if (state.debug) {
-        val color = tileDebugColors.getOrNull(index)
-          ?: tileDebugColors.last()
-
-        drawRect(
-          color = color.copy(alpha = 0.15f),
-          topLeft = tile.screenRect.topLeft,
-          size = tile.screenRect.size
+        state.sourceToViewRect(
+          source = tile.sourceRect,
+          target = tile.screenRect
         )
-        drawRect(
-          color = color,
-          topLeft = tile.screenRect.topLeft,
-          size = tile.screenRect.size,
-          style = Stroke(width = borderWidthPx)
-        )
+
+        if (tileState is TileState.Loaded) {
+          val bitmap = tileState.bitmap
+          bitmapMatrix.reset()
+
+          state.srcArray[0] = 0f                                // top_left.x
+          state.srcArray[1] = 0f                                // top_left.y
+          state.srcArray[2] = bitmap.width.toFloat()            // top_right.x
+          state.srcArray[3] = 0f                                // top_right.y
+          state.srcArray[4] = 0f                                // bottom_left.x
+          state.srcArray[5] = bitmap.height.toFloat()           // bottom_left.y
+          state.srcArray[6] = bitmap.width.toFloat()            // bottom_right.x
+          state.srcArray[7] = bitmap.height.toFloat()           // bottom_right.y
+
+          state.dstArray[0] = tile.screenRect.left.toFloat()    // top_left.x
+          state.dstArray[1] = tile.screenRect.top.toFloat()     // top_left.y
+          state.dstArray[2] = tile.screenRect.right.toFloat()   // top_right.x
+          state.dstArray[3] = tile.screenRect.top.toFloat()     // top_right.y
+          state.dstArray[4] = tile.screenRect.left.toFloat()    // bottom_left.x
+          state.dstArray[5] = tile.screenRect.bottom.toFloat()  // bottom_left.y
+          state.dstArray[6] = tile.screenRect.right.toFloat()   // bottom_right.x
+          state.dstArray[7] = tile.screenRect.bottom.toFloat()  // bottom_right.y
+
+          bitmapMatrix.setPolyToPoly(state.srcArray, 0, state.dstArray, 0, 4)
+          nativeCanvas.drawBitmap(bitmap, bitmapMatrix, bitmapPaint)
+
+          if (state.debug) {
+            val color = tileDebugColors.getOrNull(index)
+              ?: tileDebugColors.last()
+
+            drawRect(
+              color = color.copy(alpha = 0.15f),
+              topLeft = tile.screenRect.topLeft,
+              size = tile.screenRect.size
+            )
+            drawRect(
+              color = color,
+              topLeft = tile.screenRect.topLeft,
+              size = tile.screenRect.size,
+              style = Stroke(width = borderWidthPx)
+            )
+          }
+        }
+
+        if (state.debug) {
+          drawTileDebugInfo(
+            tile = tile,
+            nativeCanvas = nativeCanvas,
+            debugTextPaint = debugTextPaint
+          )
+        }
       }
     }
 
-    if (state.debug) {
-      drawTileDebugInfo(
-        tile = tile,
-        nativeCanvas = nativeCanvas,
-        debugTextPaint = debugTextPaint
-      )
-    }
+    ++index
   }
 
   if (state.debug) {
     drawDebugInfo(state, nativeCanvas, debugTextPaint)
   }
-}
-
-private fun getBestSampleSize(
-  startSampleSize: Int,
-  state: ComposeSubsamplingScaleImageState
-): Int {
-  var bestSampleSize = startSampleSize
-  val baseSampleSize = state.fullImageSampleSizeState.value
-
-  while (true) {
-    if (bestSampleSize >= baseSampleSize) {
-      return baseSampleSize
-    }
-
-    if (state.hasMissingTiles(bestSampleSize)) {
-      bestSampleSize *= 2
-      continue
-    }
-
-    break
-  }
-
-  return bestSampleSize
 }
 
 private fun DrawScope.drawDebugInfo(

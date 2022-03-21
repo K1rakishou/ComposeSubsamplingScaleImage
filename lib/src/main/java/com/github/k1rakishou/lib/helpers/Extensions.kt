@@ -71,3 +71,13 @@ internal fun Int.power(): Int {
 
   return power
 }
+
+@Suppress("ReplaceSizeCheckWithIsNotEmpty", "NOTHING_TO_INLINE")
+@OptIn(ExperimentalContracts::class)
+inline fun <T> Collection<T>?.isNotNullNorEmpty(): Boolean {
+  contract {
+    returns(true) implies (this@isNotNullNorEmpty != null)
+  }
+
+  return this != null && this.size > 0
+}
