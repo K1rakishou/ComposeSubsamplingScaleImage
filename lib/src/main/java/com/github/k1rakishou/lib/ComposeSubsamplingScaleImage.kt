@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.github.k1rakishou.lib.decoders.SkiaImageRegionDecoder
 import com.github.k1rakishou.lib.gestures.PanGestureDetector
 import com.github.k1rakishou.lib.gestures.ZoomGestureDetector
 import com.github.k1rakishou.lib.gestures.composeSubsamplingScaleImageGestureDetector
@@ -39,7 +40,7 @@ private const val TAG = "ComposeSubsamplingScaleImage"
 
 private val defaultDecoderProvider = object : ImageDecoderProvider {
   override suspend fun provide(): ComposeSubsamplingScaleImageDecoder {
-    return TachiyomiImageDecoder(debug = true)
+    return SkiaImageRegionDecoder()
   }
 }
 

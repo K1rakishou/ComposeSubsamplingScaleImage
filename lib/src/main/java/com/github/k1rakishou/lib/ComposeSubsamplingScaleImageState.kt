@@ -164,16 +164,16 @@ class ComposeSubsamplingScaleImageState(
     BackgroundUtils.ensureMainThread()
 
     if (subsamplingImageDecoder.get() == null) {
-      val success = subsamplingImageDecoder.compareAndSet(
-        null,
-        imageDecoderProvider.provide()
-      )
+      val decoder = imageDecoderProvider.provide()
 
+      val success = subsamplingImageDecoder.compareAndSet(null, decoder)
       if (!success) {
         val exception = IllegalStateException("Decoder was already initialized!")
         eventListener?.onFailedToDecodeImageInfo(exception)
 
         return InitializationState.Error(exception)
+      } else {
+        logcat { "initialize() using ${decoder.javaClass.simpleName} decoder" }
       }
     }
 
