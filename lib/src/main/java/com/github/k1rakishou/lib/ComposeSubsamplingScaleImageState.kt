@@ -46,26 +46,29 @@ class ComposeSubsamplingScaleImageState(
   val debug: Boolean,
   val minFlingMoveDistPx: Int,
   val minFlingVelocityPxPerSecond: Int,
-  val doubleTapGestureMaxAllowedDistanceBetweenTapsPx: Int,
-  val animationUpdateIntervalMs: Long,
+  val quickZoomTimeoutMs: Int,
+  val animationUpdateIntervalMs: Int,
   val zoomAnimationDurationMs: Int,
-  val panFlingAnimationDurationMs: Int,
-  private val minTileDpiDefault: Int,
-  private val debugKey: String?
+  val flingAnimationDurationMs: Int,
+  val minDpiDefault: Int,
+  val minTileDpiDefault: Int,
 ) : RememberObserver {
   private val decoderDispatcher by decoderDispatcherLazy
   private lateinit var coroutineScope: CoroutineScope
 
   private val defaultMaxScale = 2f
   internal val tileMap = LinkedHashMap<Int, MutableList<Tile>>()
-  private val minTileDpi by lazy { minTileDpi() }
+  private val minDpi by lazy { minDpi(minDpiDefault) }
+  private val minTileDpi by lazy { minTileDpi(minTileDpiDefault) }
+
   val minScale by lazy { calculateMinScale() }
-  val maxScale by lazy { calculateMaxScale(minTileDpi) }
+  val maxScale by lazy { calculateMaxScale(minDpi) }
   val doubleTapZoomScale by lazy { calculateDoubleTapZoomScale(minTileDpi) }
 
   private var satTemp = ScaleAndTranslate()
   private var needInitScreenTranslate = true
 
+  private var debugKey: String? = null
   var sourceImageDimensions: IntSize? = null
     private set
 
@@ -128,6 +131,7 @@ class ComposeSubsamplingScaleImageState(
     tileMap.clear()
     coroutineScope.cancel()
 
+    debugKey = null
     satTemp.reset()
     bitmapMatrix.reset()
     sourceImageDimensions = null
@@ -147,14 +151,24 @@ class ComposeSubsamplingScaleImageState(
     return averageDpi / dpi.toFloat()
   }
 
-  private fun minTileDpi(): Int {
-    if (minTileDpiDefault <= 0) {
+  private fun minDpi(minDpi: Int): Int {
+    if (minDpi <= 0) {
+      return 0
+    }
+
+    val metrics = getResources().displayMetrics
+    val averageDpi = (metrics.xdpi + metrics.ydpi) / 2
+    return (averageDpi / minDpi.toFloat()).toInt()
+  }
+
+  private fun minTileDpi(minTileDpi: Int): Int {
+    if (minTileDpi <= 0) {
       return 0
     }
 
     val metrics = context.resources.displayMetrics
     val averageDpi = (metrics.xdpi + metrics.ydpi) / 2
-    return Math.min(averageDpi, minTileDpiDefault.toFloat()).toInt()
+    return Math.min(averageDpi, minTileDpi.toFloat()).toInt()
   }
 
   suspend fun initialize(
@@ -178,9 +192,14 @@ class ComposeSubsamplingScaleImageState(
     }
 
     val imageDimensionsInfoResult = withContext(coroutineScope.coroutineContext) {
-      imageSourceProvider.provide()
-        .inputStream
-        .use { inputStream -> decodeImageDimensions(inputStream) }
+      imageSourceProvider.provide().let { imageSource ->
+        this@ComposeSubsamplingScaleImageState.debugKey = imageSource.debugKey
+
+        imageSource
+          .inputStream
+          .use { inputStream -> decodeImageDimensions(inputStream) }
+      }
+
     }
 
     val imageDimensions = if (imageDimensionsInfoResult.isFailure) {

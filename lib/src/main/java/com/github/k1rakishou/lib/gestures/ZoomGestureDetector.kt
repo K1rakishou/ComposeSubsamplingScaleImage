@@ -198,7 +198,7 @@ class ZoomGestureDetector(
       coroutineScope = coroutineScope!!,
       canBeCanceled = true,
       durationMs = state.zoomAnimationDurationMs,
-      animationUpdateIntervalMs = state.animationUpdateIntervalMs,
+      animationUpdateIntervalMs = state.animationUpdateIntervalMs.toLong(),
       animationParams = {
         val currentScale = state.currentScale
         val minScale = state.minScale

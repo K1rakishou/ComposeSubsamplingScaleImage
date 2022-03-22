@@ -139,8 +139,8 @@ class PanGestureDetector(
       debug = debug,
       coroutineScope = coroutineScope!!,
       canBeCanceled = true,
-      durationMs = state.panFlingAnimationDurationMs,
-      animationUpdateIntervalMs = state.animationUpdateIntervalMs,
+      durationMs = state.flingAnimationDurationMs,
+      animationUpdateIntervalMs = state.animationUpdateIntervalMs.toLong(),
       animationParams = {
         val currentScale = state.currentScale
 

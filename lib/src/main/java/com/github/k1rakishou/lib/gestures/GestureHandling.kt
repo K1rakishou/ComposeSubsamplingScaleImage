@@ -59,7 +59,7 @@ private suspend fun PointerInputScope.processGestures(
   zoomGestureDetector: ZoomGestureDetector?,
   panGestureDetector: PanGestureDetector?
 ) {
-  val maxDistanceBetweenTapsPx = state.doubleTapGestureMaxAllowedDistanceBetweenTapsPx
+  val quickZoomTimeoutMs = state.quickZoomTimeoutMs
   val activeDetectorJobs = arrayOfNulls<Job?>(DetectorType.values().size)
   val allDetectors = arrayOf(zoomGestureDetector, panGestureDetector).filterNotNull()
 
@@ -85,7 +85,7 @@ private suspend fun PointerInputScope.processGestures(
     coroutineScope {
       activeDetectorJobs[DetectorType.Zoom.index] = launch {
         detectZoomGestures(
-          maxDistanceBetweenTapsPx = maxDistanceBetweenTapsPx,
+          quickZoomTimeoutMs = quickZoomTimeoutMs,
           zoomGestureDetector = zoomGestureDetector,
           coroutineScope = this,
           detectorType = DetectorType.Zoom,
@@ -213,7 +213,7 @@ private suspend fun PointerInputScope.detectPanGestures(
 }
 
 private suspend fun PointerInputScope.detectZoomGestures(
-  maxDistanceBetweenTapsPx: Int,
+  quickZoomTimeoutMs: Int,
   zoomGestureDetector: ZoomGestureDetector?,
   coroutineScope: CoroutineScope,
   detectorType: DetectorType,
@@ -248,23 +248,12 @@ private suspend fun PointerInputScope.detectZoomGestures(
       logcat(tag = TAG) { "Gestures NOT locked, detectorType=${zoomGestureDetector.detectorType}" }
     }
 
-    val doubleTapTimeoutMillis = viewConfiguration.doubleTapTimeoutMillis
-
     val firstUpOrCancel = waitForUpOrCancellation()
       ?: return@awaitPointerEventScope
     val secondDown = awaitSecondDown(firstUpOrCancel)
       ?: return@awaitPointerEventScope
 
-    // TODO(KurobaEx): maybe this is not a good idea because this causes a situation where a double
-    //  tap like this one make the Pager scrollable again even when we are zoomed in into an image.
-    //  Maybe it should be allowed to use quick zoom with any distance between taps.
-    if ((secondDown.position - firstDown.position).getDistance() > maxDistanceBetweenTapsPx) {
-      // The distance between the first and the second taps is too big so we can't use this
-      // gesture as quick zoom anymore
-      return@awaitPointerEventScope
-    }
-
-    if ((secondDown.uptimeMillis - firstDown.uptimeMillis).absoluteValue > doubleTapTimeoutMillis) {
+    if ((secondDown.uptimeMillis - firstDown.uptimeMillis).absoluteValue > quickZoomTimeoutMs) {
       // Too much time has passed between the first and the second touch events so we can't use this
       // gesture as quick zoom anymore
       return@awaitPointerEventScope

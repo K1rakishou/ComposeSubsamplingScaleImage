@@ -14,7 +14,7 @@ sealed class MaxTileSizeInfo(
 
   // May crash if the canvas doesn't support one of the sizes (width/height)
   class Fixed(
-    size: IntSize = IntSize(2048, 2048)
+    size: IntSize
   ) : MaxTileSizeInfo(mutableStateOf(size))
 
   // Will be detected automatically by using Canvas() composable to get the native canvas and then

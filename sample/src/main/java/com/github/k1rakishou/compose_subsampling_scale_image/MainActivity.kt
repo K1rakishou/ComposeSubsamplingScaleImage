@@ -57,7 +57,10 @@ class MainActivity : ComponentActivity() {
     val imageSourceProvider = remember(key1 = imageFileName) {
       object : ImageSourceProvider {
         override suspend fun provide(): ComposeSubsamplingScaleImageSource {
-          return ComposeSubsamplingScaleImageSource(this@MainActivity.assets.open("$baseDir/${imageFileName}"))
+          return ComposeSubsamplingScaleImageSource(
+            debugKey = imageFileName,
+            inputStream = this@MainActivity.assets.open("$baseDir/${imageFileName}")
+          )
         }
       }
     }
@@ -104,12 +107,10 @@ class MainActivity : ComponentActivity() {
     ComposeSubsamplingScaleImage(
       modifier = Modifier.fillMaxSize(),
       state = rememberComposeSubsamplingScaleImageState(
-        minTileDpiDefault = 0,
-        maxMaxTileSizeInfo = { MaxTileSizeInfo.Fixed(IntSize(2048, 2048)) },
+        maxMaxTileSizeInfo = { MaxTileSizeInfo.Auto() },
         minimumScaleType = { MinimumScaleType.ScaleTypeCenterInside },
         maxScale = 5f,
         decoderDispatcherLazy = decoderDispatcherLazy,
-        debugKey = imageFileName,
         debug = true
       ),
       imageSourceProvider = imageSourceProvider,

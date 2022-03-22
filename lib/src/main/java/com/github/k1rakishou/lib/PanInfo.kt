@@ -2,7 +2,7 @@ package com.github.k1rakishou.lib
 
 import kotlin.math.absoluteValue
 
-class PanInfo(
+data class PanInfo(
   val top: Float,
   val left: Float,
   val bottom: Float,
@@ -37,32 +37,6 @@ class PanInfo(
 
   fun touchesAllSides(): Boolean {
     return touchesLeftAndRight() && touchesTopAndBottom()
-  }
-
-  override fun equals(other: Any?): Boolean {
-    if (this === other) return true
-    if (javaClass != other?.javaClass) return false
-
-    other as PanInfo
-
-    if (top != other.top) return false
-    if (left != other.left) return false
-    if (bottom != other.bottom) return false
-    if (right != other.right) return false
-
-    return true
-  }
-
-  override fun hashCode(): Int {
-    var result = top.hashCode()
-    result = 31 * result + left.hashCode()
-    result = 31 * result + bottom.hashCode()
-    result = 31 * result + right.hashCode()
-    return result
-  }
-
-  override fun toString(): String {
-    return "PanInfo(top=$top, left=$left, bottom=$bottom, right=$right)"
   }
 
   companion object {

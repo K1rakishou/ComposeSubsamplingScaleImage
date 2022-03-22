@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.github.k1rakishou.lib.decoders.SkiaImageRegionDecoder
@@ -60,26 +61,49 @@ private val tileDebugColors by lazy {
   )
 }
 
+/**
+ * Note: fling animation is an animation that is executed after the finger stops moving on the screen.
+ * This is basically the inertia scrolling animation.
+ * Note: quick zoom animation is an animation that is executed after double-tapping (zoom in/zoom out).
+ *
+ * [minFlingMoveDistPx] how many pixels a finger must move before we start considering
+ * it a fling and run the fling animation. The higher the value is the harder it will be to trigger
+ * fling animation.
+ * [minFlingVelocityPxPerSecond] the minimum speed required for us to start the fling animation.
+ * [quickZoomTimeoutMs] the maximum wait time between taps before a gesture is considered the quick
+ * zoom gesture and we either run the quick zoom animation or the gesture becomes the single finger
+ * zoom gesture.
+ * [flingAnimationDurationMs] the duration of the fling animation
+ * [maxMaxTileSizeInfo] the maximum size of a tile before we start subdividing it into smaller tiles.
+ * The higher it is the better since we will have to decode less tiles which will make image region
+ * loading faster (less regions to decode -> the faster it is). We can't set to be Int.MAX_VALUE or
+ * some other big number because Canvas has internal limitations on the bitmap size.
+ * See https://developer.android.com/reference/android/graphics/Canvas#getMaximumBitmapHeight() and
+ * https://developer.android.com/reference/android/graphics/Canvas#getMaximumBitmapWidth()
+ * [debug] enables/disables internal logging
+ * [decoderDispatcherLazy] the coroutine dispatcher that will be used to decode images.
+ * [imageDecoderProvider] the bitmap decoder that does the job
+ * */
 @Composable
 fun rememberComposeSubsamplingScaleImageState(
   minFlingMoveDistPx: Int = 50,
   minFlingVelocityPxPerSecond: Int? = null,
-  // Magic number taken from Jetpack Compose TextSelectionMouseDetector class (See ClicksSlop).
-  // May not be ideal for finger taps.
-  doubleTapGestureMaxAllowedDistanceBetweenTapsPx: Int = 100,
+  quickZoomTimeoutMs: Int? = null,
   zoomAnimationDurationMs: Int = 250,
-  panFlingAnimationDurationMs: Int = 250,
-  minTileDpiDefault: Int = 320,
+  flingAnimationDurationMs: Int = 250,
+  minDpi: Int = 160,
+  minTileDpi: Int = 320,
   maxMaxTileSizeInfo: () -> MaxTileSizeInfo = { MaxTileSizeInfo.Auto() },
   minimumScaleType: () -> MinimumScaleType = { MinimumScaleType.ScaleTypeCenterInside },
   minScale: Float? = null,
   maxScale: Float? = null,
-  debugKey: String? = null,
   debug: Boolean = false,
   decoderDispatcherLazy: Lazy<CoroutineDispatcher> = defaultDecoderDispatcher,
-  ImageDecoderProvider: ImageDecoderProvider = remember { defaultDecoderProvider }
+  imageDecoderProvider: ImageDecoderProvider = remember { defaultDecoderProvider }
 ): ComposeSubsamplingScaleImageState {
   val context = LocalContext.current
+  val composeViewConfiguration = LocalViewConfiguration.current
+
   val maxMaxTileSizeInfoRemembered = remember { maxMaxTileSizeInfo() }
   val minimumScaleTypeRemembered = remember { minimumScaleType() }
   val androidViewConfiguration = remember { ViewConfiguration.get(context) }
@@ -105,7 +129,15 @@ fun rememberComposeSubsamplingScaleImageState(
       1000f / 60f
     }
 
-    return@remember updateInterval.toLong()
+    return@remember updateInterval.toInt()
+  }
+
+  val quickZoomTimeout = remember {
+    if (quickZoomTimeoutMs != null && quickZoomTimeoutMs > 0) {
+      return@remember quickZoomTimeoutMs
+    }
+
+    return@remember composeViewConfiguration.doubleTapTimeoutMillis.toInt()
   }
 
   return remember {
@@ -115,17 +147,17 @@ fun rememberComposeSubsamplingScaleImageState(
       minimumScaleType = minimumScaleTypeRemembered,
       minScaleParam = minScale,
       maxScaleParam = maxScale,
-      imageDecoderProvider = ImageDecoderProvider,
+      imageDecoderProvider = imageDecoderProvider,
       decoderDispatcherLazy = decoderDispatcherLazy,
       debug = debug,
       minFlingMoveDistPx = minFlingMoveDistPx,
       minFlingVelocityPxPerSecond = minFlingVelocity,
-      doubleTapGestureMaxAllowedDistanceBetweenTapsPx = doubleTapGestureMaxAllowedDistanceBetweenTapsPx,
+      quickZoomTimeoutMs = quickZoomTimeout,
       animationUpdateIntervalMs = animationUpdateIntervalMs,
       zoomAnimationDurationMs = zoomAnimationDurationMs,
-      panFlingAnimationDurationMs = panFlingAnimationDurationMs,
-      minTileDpiDefault = minTileDpiDefault,
-      debugKey = debugKey
+      flingAnimationDurationMs = flingAnimationDurationMs,
+      minDpiDefault = minDpi,
+      minTileDpiDefault = minTileDpi,
     )
   }
 }
