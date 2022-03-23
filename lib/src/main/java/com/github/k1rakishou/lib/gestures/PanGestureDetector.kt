@@ -43,8 +43,8 @@ class PanGestureDetector(
     startOffset.set(offset.x, offset.y)
     vCenterStart.set(offset.x, offset.y)
     vTranslateStart.set(
-      state.vTranslate.x.toFloat(),
-      state.vTranslate.y.toFloat()
+      state.vTranslate.x,
+      state.vTranslate.y
     )
   }
 
@@ -60,22 +60,23 @@ class PanGestureDetector(
     val minOffset: Float = density.density * 5
     if (dx > minOffset || dy > minOffset || isPanning) {
       state.vTranslate.set(
-        x = (vTranslateStart.x + (offset.x - vCenterStart.x)).toInt(),
-        y = (vTranslateStart.y + (offset.y - vCenterStart.y)).toInt()
+        (vTranslateStart.x + (offset.x - vCenterStart.x)),
+        (vTranslateStart.y + (offset.y - vCenterStart.y))
       )
 
-      val lastX: Float = state.vTranslate.x.toFloat()
-      val lastY: Float = state.vTranslate.y.toFloat()
+      val lastX: Float = state.vTranslate.x
+      val lastY: Float = state.vTranslate.y
       state.fitToBounds(true)
-      val atXEdge = lastX != state.vTranslate.x.toFloat()
-      val atYEdge = lastY != state.vTranslate.y.toFloat()
+      val atXEdge = lastX != state.vTranslate.x
+      val atYEdge = lastY != state.vTranslate.y
       val edgeXSwipe = atXEdge && dx > dy && !isPanning
       val edgeYSwipe = atYEdge && dy > dx && !isPanning
-      val yPan = lastY == state.vTranslate.y.toFloat() && dy > minOffset * 3
+      val yPan = lastY == state.vTranslate.y && dy > minOffset * 3
 
       if (!edgeXSwipe && !edgeYSwipe && (!atXEdge || !atYEdge || yPan || isPanning)) {
         isPanning = true
         state.refreshRequiredTiles(load = false)
+        state.requestInvalidate()
       }
     }
   }
@@ -123,6 +124,7 @@ class PanGestureDetector(
     animatingFling = false
     velocityTracker.resetTracking()
     state.refreshRequiredTiles(load = true)
+    state.requestInvalidate()
 
     coroutineScope?.cancel()
     coroutineScope = null
@@ -192,11 +194,12 @@ class PanGestureDetector(
           duration = duration
         )
 
-        state.vTranslate.xState.value -= (state.sourceToViewX(params.sCenterEnd.x) - vFocusNowX).toInt()
-        state.vTranslate.yState.value -= (state.sourceToViewY(params.sCenterEnd.y) - vFocusNowY).toInt()
+        state.vTranslate.x -= (state.sourceToViewX(params.sCenterEnd.x) - vFocusNowX).toInt()
+        state.vTranslate.y -= (state.sourceToViewY(params.sCenterEnd.y) - vFocusNowY).toInt()
 
         state.fitToBounds(finished || startScale == endScale)
         state.refreshRequiredTiles(finished)
+        state.requestInvalidate()
       },
       onAnimationEnd = { canceled ->
         onGestureEnded(

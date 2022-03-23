@@ -6,9 +6,11 @@ import android.content.res.Resources
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.PointF
+import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.util.Log
 import androidx.compose.runtime.RememberObserver
+import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.unit.IntSize
 import com.github.k1rakishou.lib.gestures.GestureAnimationEasing
@@ -70,6 +72,9 @@ class ComposeSubsamplingScaleImageState(
 
   private var satTemp = ScaleAndTranslate()
   private var needInitScreenTranslate = true
+  val vTranslate = PointF()
+  var currentScale = 0f
+  private var lastInvalidateTime = 0L
 
   private var debugKey: String? = null
   var sourceImageDimensions: IntSize? = null
@@ -88,16 +93,16 @@ class ComposeSubsamplingScaleImageState(
 
   private val subsamplingImageDecoder = AtomicReference<ComposeSubsamplingScaleImageDecoder?>(null)
 
-  val vTranslate = PointState()
   val initializationState = mutableStateOf<InitializationState>(InitializationState.Uninitialized)
-  val scaleState = mutableStateOf(0f)
   val fullImageSampleSizeState = mutableStateOf(0)
   internal val availableDimensions = mutableStateOf(IntSize.Zero)
 
   // Tile are loaded asynchronously.
   // invalidate value is incremented every time we decode a new tile.
   // It's needed to notify the composition to redraw current tileMap.
-  val invalidate = mutableStateOf(0)
+  private val _invalidate = mutableStateOf(0)
+  val invalidate: State<Int>
+    get() = _invalidate
 
   // Width of the composable
   val viewWidth: Int
@@ -112,9 +117,6 @@ class ComposeSubsamplingScaleImageState(
   // Height the source image
   val sHeight: Int
     get() = requireNotNull(sourceImageDimensions?.height) { "sourceImageDimensions is null!" }
-
-  val currentScale: Float
-    get() = scaleState.value
 
   val isReady: Boolean
     get() = initializationState.value is InitializationState.Success
@@ -131,18 +133,26 @@ class ComposeSubsamplingScaleImageState(
     reset()
   }
 
-  private fun reset() {
-    vTranslate.reset()
+  fun requestInvalidate(forced: Boolean = false) {
+    if (!forced && (SystemClock.elapsedRealtime() - lastInvalidateTime < animationUpdateIntervalMs)) {
+      return
+    }
 
+    _invalidate.value = _invalidate.value + 1
+    lastInvalidateTime = SystemClock.elapsedRealtime()
+  }
+
+  private fun reset() {
     tileMap.entries.forEach { (_, tiles) -> tiles.forEach { tile -> tile.recycle() } }
     tileMap.clear()
     coroutineScope.cancel()
 
     debugKey = null
+    vTranslate.set(0f, 0f)
     satTemp.reset()
     bitmapMatrix.reset()
     sourceImageDimensions = null
-    scaleState.value = 1f
+    currentScale = 0f
     fullImageSampleSizeState.value = 0
     availableDimensions.value = IntSize.Zero
     srcArray.fill(0f)
@@ -286,7 +296,7 @@ class ComposeSubsamplingScaleImageState(
       sourceWidth = imageDimensions.width,
       sourceHeight = imageDimensions.height,
       fullImageSampleSize = fullImageSampleSizeState.value,
-      scale = scaleState.value
+      scale = currentScale
     )
 
     if (refreshTilesResult.isFailure) {
@@ -393,7 +403,8 @@ class ComposeSubsamplingScaleImageState(
               eventListener?.onFullImageLoaded()
             }
 
-            invalidate.value = invalidate.value + 1
+            // Force redraw the whole image when a new tile is loaded
+            requestInvalidate(forced = true)
           }
         }
       }
@@ -415,7 +426,7 @@ class ComposeSubsamplingScaleImageState(
         sourceWidth = sWidth,
         sourceHeight = sHeight,
         fullImageSampleSize = fullImageSampleSizeState.value,
-        scale = scaleState.value
+        scale = currentScale
       )
 
       if (refreshTilesResult.isFailure && debug) {
@@ -503,19 +514,19 @@ class ComposeSubsamplingScaleImageState(
   }
 
   private fun viewToSourceX(vx: Float): Float {
-    return (vx - vTranslate.x) / scaleState.value
+    return (vx - vTranslate.x) / currentScale
   }
 
   private fun viewToSourceY(vy: Float): Float {
-    return (vy - vTranslate.y) / scaleState.value
+    return (vy - vTranslate.y) / currentScale
   }
 
   fun sourceToViewX(sx: Float): Float {
-    return (sx * scaleState.value) + vTranslate.x
+    return (sx * currentScale) + vTranslate.x
   }
 
   fun sourceToViewY(sy: Float): Float {
-    return (sy * scaleState.value) + vTranslate.y
+    return (sy * currentScale) + vTranslate.y
   }
 
   internal fun calculateInSampleSize(sourceWidth: Int, sourceHeight: Int, scale: Float): Int {
@@ -633,19 +644,13 @@ class ComposeSubsamplingScaleImageState(
   }
 
   fun fitToBounds(center: Boolean) {
-    satTemp.scale = scaleState.value
-    satTemp.vTranslate.set(
-      vTranslate.x.toFloat(),
-      vTranslate.y.toFloat()
-    )
+    satTemp.scale = currentScale
+    satTemp.vTranslate.set(vTranslate.x, vTranslate.y)
 
     fitToBounds(center, satTemp)
 
-    scaleState.value = satTemp.scale
-    vTranslate.set(
-      satTemp.vTranslate.x.toInt(),
-      satTemp.vTranslate.y.toInt()
-    )
+    currentScale = satTemp.scale
+    vTranslate.set(satTemp.vTranslate.x, satTemp.vTranslate.y)
 
     if (needInitScreenTranslate) {
       needInitScreenTranslate = false
@@ -654,7 +659,7 @@ class ComposeSubsamplingScaleImageState(
         vTranslateForSCenter(
           sCenterX = (sWidth / 2).toFloat(),
           sCenterY = (sHeight / 2).toFloat(),
-          scale = scaleState.value
+          scale = currentScale
         )
       )
     }
@@ -902,13 +907,12 @@ class ComposeSubsamplingScaleImageState(
       return null
     }
 
-    val scale = scaleState.value
-    val scaleWidth: Float = scale * sWidth
-    val scaleHeight: Float = scale * sHeight
+    val scaleWidth: Float = currentScale * sWidth
+    val scaleHeight: Float = currentScale * sHeight
 
     return PanInfo(
-      top = Math.max(0f, -vTranslate.y.toFloat()),
-      left = Math.max(0f, -vTranslate.x.toFloat()),
+      top = Math.max(0f, -vTranslate.y),
+      left = Math.max(0f, -vTranslate.x),
       bottom = Math.max(0f, scaleHeight + vTranslate.y - viewHeight),
       right = Math.max(0f, scaleWidth + vTranslate.x - viewWidth),
       horizontalTolerance = horizontalTolerance,

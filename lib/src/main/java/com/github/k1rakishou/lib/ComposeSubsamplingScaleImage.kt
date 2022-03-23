@@ -226,6 +226,7 @@ fun ComposeSubsamplingScaleImage(
       }
       is InitializationState.Success -> {
         val invalidate by state.invalidate
+        val fullImageSampleSize by state.fullImageSampleSizeState
 
         Canvas(
           modifier = modifier.then(Modifier.clipToBounds()),
@@ -233,8 +234,9 @@ fun ComposeSubsamplingScaleImage(
             DrawTileGrid(
               state = state,
               sourceImageDimensions = state.sourceImageDimensions,
-              invalidate = invalidate,
-              debugValues = debugValues
+              debugValues = debugValues,
+              fullImageSampleSize = fullImageSampleSize,
+              invalidate = invalidate
             )
 
             if (state.debug) {
@@ -286,15 +288,13 @@ private fun detectCanvasMaxBitmapSize(onBitmapSizeDetected: (IntSize) -> Unit): 
 private fun DrawScope.DrawTileGrid(
   state: ComposeSubsamplingScaleImageState,
   sourceImageDimensions: IntSize?,
+  debugValues: DebugValues,
+  fullImageSampleSize: Int,
   invalidate: Int,
-  debugValues: DebugValues
 ) {
   if (sourceImageDimensions == null) {
     return
   }
-
-  val fullImageSampleSize by state.fullImageSampleSizeState
-  val scale by state.scaleState
 
   state.fitToBounds(false)
 
@@ -302,6 +302,7 @@ private fun DrawScope.DrawTileGrid(
   val tileMap = state.tileMap
   val bitmapPaint = state.bitmapPaint
   val bitmapMatrix = state.bitmapMatrix
+  val scale = state.currentScale
   val debugTextPaint = debugValues.debugTextPaint
   val borderWidthPx = debugValues.borderWidthPx
 
@@ -523,14 +524,14 @@ private fun formatSourceCenterText(center: PointF): String {
 }
 
 private fun formatTranslateText(
-  screenTranslateX: Int,
-  screenTranslateY: Int
+  screenTranslateX: Float,
+  screenTranslateY: Float
 ): String {
   return buildString {
     append("Translate: ")
-    append(String.format(Locale.ENGLISH, "%.2f", screenTranslateX.toFloat()))
+    append(String.format(Locale.ENGLISH, "%.2f", screenTranslateX))
     append("; ")
-    append(String.format(Locale.ENGLISH, "%.2f", screenTranslateY.toFloat()))
+    append(String.format(Locale.ENGLISH, "%.2f", screenTranslateY))
   }
 }
 
