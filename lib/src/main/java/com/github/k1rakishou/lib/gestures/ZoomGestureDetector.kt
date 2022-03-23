@@ -10,6 +10,7 @@ import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import com.github.k1rakishou.lib.ComposeSubsamplingScaleImageState
+import com.github.k1rakishou.lib.ScaleAndTranslate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -20,21 +21,19 @@ class ZoomGestureDetector(
 ) : GestureDetector(DetectorType.Zoom, state.debug) {
   private val quickScaleThreshold = with(density) { 20.dp.toPx() }
 
-  // vCenterStart
-  private val screenCenterStart = PointF(0f, 0f)
-  // vTranslateStart
-  private val screenTranslateStart = PointF(0f, 0f)
+  private val vCenterStart = PointF(0f, 0f)
+  private val vTranslateStart = PointF(0f, 0f)
 
-  // quickScaleSCenter
-  private val quickScaleSourceCenter = PointF(0f, 0f)
-  // quickScaleVStart
-  private val quickScaleScreenStart = PointF(0f, 0f)
-  // quickScaleVLastPoint
-  private val quickScaleScreenLastPoint = PointF(0f, 0f)
+  private val quickScaleSCenter = PointF(0f, 0f)
+  private val quickScaleVStart = PointF(0f, 0f)
+  private val quickScaleVLastPoint = PointF(0f, 0f)
+
+  private val sCenterStart = PointF(0f, 0f)
+  private val sCenterEnd = PointF(0f, 0f)
+  private val sCenterEndRequested = PointF(0f, 0f)
 
   private var scaleStart = 0f
   private var isQuickScaling = false
-  private var isZooming = false
   private var quickScaleMoved = false
   private var quickScaleLastDistance = 0f
   private var animatingQuickZoom = false
@@ -49,20 +48,16 @@ class ZoomGestureDetector(
 
     val offset = pointerInputChange.position
     val currentScale = state.scaleState.value
-    val screenTranslateX = state.screenTranslate.x.toFloat()
-    val screenTranslateY = state.screenTranslate.y.toFloat()
+    val screenTranslateX = state.vTranslate.x.toFloat()
+    val screenTranslateY = state.vTranslate.y.toFloat()
 
-    screenCenterStart.set(offset.x, offset.y)
-    screenTranslateStart.set(screenTranslateX, screenTranslateY)
+    vCenterStart.set(offset.x, offset.y)
+    vTranslateStart.set(screenTranslateX, screenTranslateY)
     scaleStart = currentScale
-    isQuickScaling = true
-    isZooming = true
-    animatingQuickZoom = false
     quickScaleLastDistance = -1f
-    quickScaleSourceCenter.set(state.viewToSourceCoord(screenCenterStart))
-    quickScaleScreenStart.set(offset.x, offset.y)
-    quickScaleScreenLastPoint.set(quickScaleSourceCenter.x, quickScaleSourceCenter.y)
-    quickScaleMoved = false
+    quickScaleSCenter.set(state.viewToSourceCoord(vCenterStart))
+    quickScaleVStart.set(offset.x, offset.y)
+    quickScaleVLastPoint.set(quickScaleSCenter.x, quickScaleSCenter.y)
   }
 
   override fun onGestureEnded(canceled: Boolean, pointerInputChange: PointerInputChange) {
@@ -79,14 +74,18 @@ class ZoomGestureDetector(
 
     super.onGestureEnded(canceled, pointerInputChange)
 
-    screenCenterStart.set(0f, 0f)
-    screenTranslateStart.set(0f, 0f)
-    quickScaleSourceCenter.set(0f, 0f)
-    quickScaleScreenStart.set(0f, 0f)
-    quickScaleScreenLastPoint.set(0f, 0f)
+    vCenterStart.set(0f, 0f)
+    vTranslateStart.set(0f, 0f)
+    quickScaleSCenter.set(0f, 0f)
+    quickScaleVStart.set(0f, 0f)
+    quickScaleVLastPoint.set(0f, 0f)
+
+    sCenterStart.set(0f, 0f)
+    sCenterEnd.set(0f, 0f)
+    sCenterEndRequested.set(0f, 0f)
+
     scaleStart = 0f
     isQuickScaling = false
-    isZooming = false
     animatingQuickZoom = false
     quickScaleMoved = false
     quickScaleLastDistance = 0f
@@ -101,14 +100,14 @@ class ZoomGestureDetector(
     super.onGestureUpdated(pointerInputChange)
 
     val offset = pointerInputChange.position
-    var dist = Math.abs(quickScaleScreenStart.y - offset.y) * 2 + quickScaleThreshold
+    var dist = Math.abs(quickScaleVStart.y - offset.y) * 2 + quickScaleThreshold
 
     if (quickScaleLastDistance == -1f) {
       quickScaleLastDistance = dist
     }
 
-    val isUpwards: Boolean = offset.y > quickScaleScreenLastPoint.y
-    quickScaleScreenLastPoint.set(0f, offset.y)
+    val isUpwards: Boolean = offset.y > quickScaleVLastPoint.y
+    quickScaleVLastPoint.set(0f, offset.y)
     val spanDiff = Math.abs(1 - (dist / quickScaleLastDistance)) * 0.5f
 
     if (spanDiff > 0.03f || quickScaleMoved) {
@@ -126,24 +125,24 @@ class ZoomGestureDetector(
       )
       state.scaleState.value = newScale
 
-      val vLeftStart: Float = screenCenterStart.x - screenTranslateStart.x
-      val vTopStart: Float = screenCenterStart.y - screenTranslateStart.y
+      val vLeftStart: Float = vCenterStart.x - vTranslateStart.x
+      val vTopStart: Float = vCenterStart.y - vTranslateStart.y
       val vLeftNow: Float = vLeftStart * (newScale / scaleStart)
       val vTopNow: Float = vTopStart * (newScale / scaleStart)
 
-      state.screenTranslate.set(
-        x = (screenCenterStart.x - vLeftNow).toInt(),
-        y = (screenCenterStart.y - vTopNow).toInt()
+      state.vTranslate.set(
+        x = (vCenterStart.x - vLeftNow).toInt(),
+        y = (vCenterStart.y - vTopNow).toInt()
       )
 
       if (
-        (previousScale * state.sourceHeight < state.availableHeight && newScale * state.sourceHeight >= state.availableHeight) ||
-        (previousScale * state.sourceWidth < state.availableWidth && newScale * state.sourceWidth >= state.availableWidth)
+        (previousScale * state.sHeight < state.viewHeight && newScale * state.sHeight >= state.viewHeight) ||
+        (previousScale * state.sWidth < state.viewWidth && newScale * state.sWidth >= state.viewWidth)
       ) {
         state.fitToBounds(true)
-        screenCenterStart.set(state.sourceToViewCoord(quickScaleSourceCenter))
+        vCenterStart.set(state.sourceToViewCoord(quickScaleSCenter))
 
-        screenTranslateStart.set(state.screenTranslate.x.toFloat(), state.screenTranslate.y.toFloat())
+        vTranslateStart.set(state.vTranslate.x.toFloat(), state.vTranslate.y.toFloat())
         scaleStart = newScale
         dist = 0f
       }
@@ -158,101 +157,170 @@ class ZoomGestureDetector(
     val style = Stroke(width = 8f)
 
     with(drawScope) {
-      if (screenCenterStart.x > 0f || screenCenterStart.y > 0f) {
+      if (animatingQuickZoom) {
+        val vCenterStart: PointF = state.sourceToViewCoord(sCenterStart)
+        val vCenterEndRequested: PointF = state.sourceToViewCoord(sCenterEndRequested)
+        val vCenterEnd: PointF = state.sourceToViewCoord(sCenterEnd)
+
+        drawCircle(
+          color = Color.Magenta,
+          radius = 10.dp.toPx(),
+          style = style,
+          center = Offset(vCenterStart.x, vCenterStart.y)
+        )
+
         drawCircle(
           color = Color.Red,
           radius = 20.dp.toPx(),
           style = style,
-          center = Offset(screenCenterStart.x, screenCenterStart.y)
+          center = Offset(vCenterEndRequested.x, vCenterEndRequested.y)
         )
-      }
 
-      if (quickScaleSourceCenter.x > 0 || quickScaleSourceCenter.y > 0) {
         drawCircle(
           color = Color.Blue,
-          radius = 35.dp.toPx(),
+          radius = 25.dp.toPx(),
           style = style,
-          center = Offset(
-            state.sourceToViewX(quickScaleSourceCenter.x),
-            state.sourceToViewY(quickScaleSourceCenter.y),
-          )
+          center = Offset(vCenterEnd.x, vCenterEnd.y)
         )
-      }
 
-      if ((quickScaleScreenStart.x > 0 || quickScaleScreenStart.y > 0) && isQuickScaling) {
         drawCircle(
           color = Color.Cyan,
           radius = 30.dp.toPx(),
           style = style,
-          center = Offset(quickScaleScreenStart.x, quickScaleScreenStart.y)
+          center = Offset(state.viewWidth / 2f, state.viewHeight / 2f)
+        )
+      }
+
+      if (vCenterStart.x > 0f || vCenterStart.y > 0f) {
+        drawCircle(
+          color = Color.Green,
+          radius = 20.dp.toPx(),
+          style = style,
+          center = Offset(vCenterStart.x, vCenterStart.y)
+        )
+      }
+
+      if (quickScaleSCenter.x > 0 || quickScaleSCenter.y > 0) {
+        drawCircle(
+          color = Color.Yellow,
+          radius = 35.dp.toPx(),
+          style = style,
+          center = Offset(
+            state.sourceToViewX(quickScaleSCenter.x),
+            state.sourceToViewY(quickScaleSCenter.y),
+          )
+        )
+      }
+
+      if ((quickScaleVStart.x > 0 || quickScaleVStart.y > 0) && isQuickScaling) {
+        drawCircle(
+          color = Color.White,
+          radius = 30.dp.toPx(),
+          style = style,
+          center = Offset(quickScaleVStart.x, quickScaleVStart.y)
         )
       }
     }
   }
 
   private fun initAndStartQuickZoomAnimation(debug: Boolean, pointerInputChange: PointerInputChange) {
-    val vTranslateBefore = PointF(0f, 0f)
+    val offset = pointerInputChange.position
+    val vTranslateX = state.vTranslate.x.toFloat()
+    val vTranslateY = state.vTranslate.y.toFloat()
+
+    vCenterStart.set(offset.x, offset.y)
+    vTranslateStart.set(vTranslateX, vTranslateY)
+    scaleStart = state.scaleState.value
+    isQuickScaling = false
+    quickScaleLastDistance = -1f
+    quickScaleSCenter.set(state.viewToSourceCoord(vCenterStart))
+    quickScaleVStart.set(offset.x, offset.y)
+    quickScaleVLastPoint.set(quickScaleSCenter.x, quickScaleSCenter.y)
 
     currentGestureAnimation = GestureAnimation<GestureAnimationParameters>(
       debug = debug,
       coroutineScope = coroutineScope!!,
-      canBeCanceled = true,
+      canBeCanceled = false,
       durationMs = state.zoomAnimationDurationMs,
       animationUpdateIntervalMs = state.animationUpdateIntervalMs.toLong(),
       animationParams = {
         val currentScale = state.currentScale
         val minScale = state.minScale
-        val doubleTapZoomScale = Math.min(state.maxScale, state.doubleTapZoomScale)
 
-        val zoomIn = currentScale <= doubleTapZoomScale * 0.9 || currentScale == minScale
-        val endScale = if (zoomIn) doubleTapZoomScale else minScale
+        val doubleTapZoomScale = Math.min(state.maxScale, state.doubleTapZoomScale)
+        val zoomIn = (currentScale <= doubleTapZoomScale * 0.9) || (currentScale == minScale)
+        val endScale = if (zoomIn) doubleTapZoomScale else state.calculateMinScale()
+        val targetScale = state.limitedScale(endScale)
+
+        val sCenter = quickScaleSCenter
+        val vFocus = if (zoomIn) {
+          vCenterStart
+        } else {
+          null
+        }
 
         val targetSCenter = state.limitedSCenter(
-          sCenterX = this.quickScaleSourceCenter.x,
-          sCenterY = this.quickScaleSourceCenter.y,
-          scale = endScale,
+          sCenterX = sCenter.x,
+          sCenterY = sCenter.y,
+          scale = targetScale,
           sTarget = PointF()
         )
 
-        val vxCenter = state.availableWidth / 2f
-        val vyCenter = state.availableHeight / 2f
-
         val vFocusStart = state.sourceToViewCoord(targetSCenter)
-        val vFocusEnd = PointF(vxCenter, vyCenter)
+
+        val sCenterEnd = targetSCenter
+        val sCenterStart = state.getCenter()
+
+        val vFocusEnd = if (vFocus != null) {
+          val vTranslateXEnd: Float = vFocus.x - targetScale * sCenterStart.x
+          val vTranslateYEnd: Float = vFocus.y - targetScale * sCenterStart.y
+
+          val satEnd = ScaleAndTranslate(
+            scale = targetScale,
+            vTranslate = PointF(vTranslateXEnd, vTranslateYEnd)
+          )
+          state.fitToBounds(true, satEnd)
+
+          PointF(
+            vFocus.x + (satEnd.vTranslate.x - vTranslateXEnd),
+            vFocus.y + (satEnd.vTranslate.y - vTranslateYEnd)
+          )
+        } else {
+          val vxCenter = state.viewWidth / 2f
+          val vyCenter = state.viewHeight / 2f
+
+          PointF(vxCenter, vyCenter)
+        }
+
+        this.sCenterStart.set(sCenterStart)
+        this.sCenterEnd.set(targetSCenter)
+        this.sCenterEndRequested.set(targetSCenter)
 
         return@GestureAnimation GestureAnimationParameters(
           gestureAnimationEasing = GestureAnimationEasing.EaseInOutQuad,
           startTime = SystemClock.elapsedRealtime(),
           startScale = currentScale,
-          endScale = endScale,
-          targetSourceCenter = quickScaleSourceCenter,
-          screenFocus = quickScaleScreenStart,
+          endScale = targetScale,
           vFocusStart = vFocusStart,
           vFocusEnd = vFocusEnd,
-          sCenterEnd = targetSCenter
+          sCenterEnd = sCenterEnd
         )
       },
       animation = { params: GestureAnimationParameters, _: Float, duration: Long ->
         val startScale = params.startScale
         val endScale = params.endScale
-        vTranslateBefore.set(
-          state.screenTranslate.x.toFloat(),
-          state.screenTranslate.y.toFloat()
-        )
 
         var timeElapsed = SystemClock.elapsedRealtime() - params.startTime
         val finished = timeElapsed > duration
         timeElapsed = Math.min(timeElapsed, duration)
 
-        val newScale = state.ease(
+        state.scaleState.value = state.ease(
           gestureAnimationEasing = params.gestureAnimationEasing,
           time = timeElapsed,
           from = startScale,
           change = endScale - startScale,
           duration = duration
         )
-
-        state.scaleState.value = newScale
 
         val vFocusNowX = state.ease(
           gestureAnimationEasing = params.gestureAnimationEasing,
@@ -261,6 +329,7 @@ class ZoomGestureDetector(
           change = params.vFocusEnd.x - params.vFocusStart.x,
           duration = duration
         )
+
         val vFocusNowY = state.ease(
           gestureAnimationEasing = params.gestureAnimationEasing,
           time = timeElapsed,
@@ -269,8 +338,8 @@ class ZoomGestureDetector(
           duration = duration
         )
 
-        state.screenTranslate.xState.value -= (state.sourceToViewX(params.sCenterEnd.x) - vFocusNowX).toInt()
-        state.screenTranslate.yState.value -= (state.sourceToViewY(params.sCenterEnd.y) - vFocusNowY).toInt()
+        state.vTranslate.xState.value -= (state.sourceToViewX(params.sCenterEnd.x) - vFocusNowX).toInt()
+        state.vTranslate.yState.value -= (state.sourceToViewY(params.sCenterEnd.y) - vFocusNowY).toInt()
 
         state.fitToBounds(finished || startScale == endScale)
         state.refreshRequiredTiles(finished)
@@ -293,10 +362,6 @@ class ZoomGestureDetector(
     val startTime: Long,
     val startScale: Float,
     val endScale: Float,
-    // sCenter
-    val targetSourceCenter: PointF,
-    // vFocus
-    val screenFocus: PointF,
 
     val vFocusStart: PointF,
     val vFocusEnd: PointF,

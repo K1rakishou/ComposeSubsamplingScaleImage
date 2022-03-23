@@ -31,7 +31,6 @@ import com.github.k1rakishou.lib.gestures.PanGestureDetector
 import com.github.k1rakishou.lib.gestures.ZoomGestureDetector
 import com.github.k1rakishou.lib.gestures.composeSubsamplingScaleImageGestureDetector
 import com.github.k1rakishou.lib.helpers.isAndroid11
-import com.github.k1rakishou.lib.helpers.logcat
 import java.util.Locale
 import java.util.concurrent.Executors
 import kotlinx.coroutines.CoroutineDispatcher
@@ -91,8 +90,9 @@ fun rememberComposeSubsamplingScaleImageState(
   quickZoomTimeoutMs: Int? = null,
   zoomAnimationDurationMs: Int = 250,
   flingAnimationDurationMs: Int = 250,
-  minDpi: Int = 160,
-  minTileDpi: Int = 320,
+  minDpi: Int? = 160,
+  minTileDpi: Int? = null,
+  doubleTapZoomDpiDefault: Int? = 160,
   maxMaxTileSizeInfo: () -> MaxTileSizeInfo = { MaxTileSizeInfo.Auto() },
   minimumScaleType: () -> MinimumScaleType = { MinimumScaleType.ScaleTypeCenterInside },
   minScale: Float? = null,
@@ -143,7 +143,7 @@ fun rememberComposeSubsamplingScaleImageState(
   return remember {
     ComposeSubsamplingScaleImageState(
       context = context,
-      maxMaxTileSizeInfo = maxMaxTileSizeInfoRemembered,
+      maxTileSizeInfo = maxMaxTileSizeInfoRemembered,
       minimumScaleType = minimumScaleTypeRemembered,
       minScaleParam = minScale,
       maxScaleParam = maxScale,
@@ -158,6 +158,7 @@ fun rememberComposeSubsamplingScaleImageState(
       flingAnimationDurationMs = flingAnimationDurationMs,
       minDpiDefault = minDpi,
       minTileDpiDefault = minTileDpi,
+      doubleTapZoomDpiDefault = doubleTapZoomDpiDefault
     )
   }
 }
@@ -171,11 +172,10 @@ fun ComposeSubsamplingScaleImage(
   FullImageLoadingContent: (@Composable () -> Unit)? = null,
   FullImageErrorLoadingContent: (@Composable (Throwable) -> Unit)? = null
 ) {
-  if (state.maxMaxTileSizeInfo is MaxTileSizeInfo.Auto) {
+  if (state.maxTileSizeInfo is MaxTileSizeInfo.Auto) {
     val detected = detectCanvasMaxBitmapSize(
       onBitmapSizeDetected = { bitmapSize ->
-        logcat(tag = TAG) { "CanvasMaxBitmapSize detected: ${bitmapSize}" }
-        state.maxMaxTileSizeInfo.maxTileSizeState.value = bitmapSize
+        state.maxTileSizeInfo.maxTileSizeState.value = bitmapSize
       }
     )
 
@@ -216,7 +216,6 @@ fun ComposeSubsamplingScaleImage(
     )
 
     val initializationMut by state.initializationState
-
 
     when (val initialization = initializationMut) {
       InitializationState.Uninitialized -> {
@@ -411,8 +410,8 @@ private fun DrawScope.drawDebugInfo(
   val scale = state.currentScale
   val minScale = state.minScale
   val maxScale = state.maxScale
-  val screenTranslateX = state.screenTranslate.x
-  val screenTranslateY = state.screenTranslate.y
+  val screenTranslateX = state.vTranslate.x
+  val screenTranslateY = state.vTranslate.y
 
   nativeCanvas.drawText(
     formatScaleText(scale, minScale, maxScale),

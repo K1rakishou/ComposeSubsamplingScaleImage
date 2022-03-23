@@ -37,7 +37,7 @@ internal val maximumBitmapSizeState = mutableStateOf<IntSize?>(null)
 
 class ComposeSubsamplingScaleImageState(
   val context: Context,
-  val maxMaxTileSizeInfo: MaxTileSizeInfo,
+  val maxTileSizeInfo: MaxTileSizeInfo,
   val minimumScaleType: MinimumScaleType,
   val minScaleParam: Float?,
   val maxScaleParam: Float?,
@@ -50,20 +50,23 @@ class ComposeSubsamplingScaleImageState(
   val animationUpdateIntervalMs: Int,
   val zoomAnimationDurationMs: Int,
   val flingAnimationDurationMs: Int,
-  val minDpiDefault: Int,
-  val minTileDpiDefault: Int,
+  val minDpiDefault: Int?,
+  val minTileDpiDefault: Int?,
+  val doubleTapZoomDpiDefault: Int?,
 ) : RememberObserver {
   private val decoderDispatcher by decoderDispatcherLazy
   private lateinit var coroutineScope: CoroutineScope
 
   private val defaultMaxScale = 2f
+  private val defaultDoubleTapZoom = 1f
+
   internal val tileMap = LinkedHashMap<Int, MutableList<Tile>>()
   private val minDpi by lazy { minDpi(minDpiDefault) }
   private val minTileDpi by lazy { minTileDpi(minTileDpiDefault) }
 
   val minScale by lazy { calculateMinScale() }
   val maxScale by lazy { calculateMaxScale(minDpi) }
-  val doubleTapZoomScale by lazy { calculateDoubleTapZoomScale(minTileDpi) }
+  val doubleTapZoomScale by lazy { calculateDoubleTapZoomScale(doubleTapZoomDpiDefault) }
 
   private var satTemp = ScaleAndTranslate()
   private var needInitScreenTranslate = true
@@ -85,25 +88,29 @@ class ComposeSubsamplingScaleImageState(
 
   private val subsamplingImageDecoder = AtomicReference<ComposeSubsamplingScaleImageDecoder?>(null)
 
-  val screenTranslate = PointState()
+  val vTranslate = PointState()
   val initializationState = mutableStateOf<InitializationState>(InitializationState.Uninitialized)
   val scaleState = mutableStateOf(0f)
   val fullImageSampleSizeState = mutableStateOf(0)
-  val availableDimensions = mutableStateOf(IntSize.Zero)
+  internal val availableDimensions = mutableStateOf(IntSize.Zero)
 
   // Tile are loaded asynchronously.
   // invalidate value is incremented every time we decode a new tile.
   // It's needed to notify the composition to redraw current tileMap.
   val invalidate = mutableStateOf(0)
 
-  val availableWidth: Int
+  // Width of the composable
+  val viewWidth: Int
     get() = availableDimensions.value.width
-  val availableHeight: Int
+  // Height of the composable
+  val viewHeight: Int
     get() = availableDimensions.value.height
 
-  val sourceWidth: Int
+  // Width of the source image
+  val sWidth: Int
     get() = requireNotNull(sourceImageDimensions?.width) { "sourceImageDimensions is null!" }
-  val sourceHeight: Int
+  // Height the source image
+  val sHeight: Int
     get() = requireNotNull(sourceImageDimensions?.height) { "sourceImageDimensions is null!" }
 
   val currentScale: Float
@@ -125,7 +132,7 @@ class ComposeSubsamplingScaleImageState(
   }
 
   private fun reset() {
-    screenTranslate.reset()
+    vTranslate.reset()
 
     tileMap.entries.forEach { (_, tiles) -> tiles.forEach { tile -> tile.recycle() } }
     tileMap.clear()
@@ -145,15 +152,19 @@ class ComposeSubsamplingScaleImageState(
     initializationState.value = InitializationState.Uninitialized
   }
 
-  private fun calculateDoubleTapZoomScale(dpi: Int): Float {
+  private fun calculateDoubleTapZoomScale(dpi: Int?): Float {
+    if (dpi == null || dpi <= 0) {
+      return defaultDoubleTapZoom
+    }
+
     val metrics = getResources().displayMetrics
     val averageDpi = (metrics.xdpi + metrics.ydpi) / 2
     return averageDpi / dpi.toFloat()
   }
 
-  private fun minDpi(minDpi: Int): Int {
-    if (minDpi <= 0) {
-      return 0
+  private fun minDpi(minDpi: Int?): Int? {
+    if (minDpi == null || minDpi <= 0) {
+      return null
     }
 
     val metrics = getResources().displayMetrics
@@ -161,9 +172,9 @@ class ComposeSubsamplingScaleImageState(
     return (averageDpi / minDpi.toFloat()).toInt()
   }
 
-  private fun minTileDpi(minTileDpi: Int): Int {
-    if (minTileDpi <= 0) {
-      return 0
+  private fun minTileDpi(minTileDpi: Int?): Int? {
+    if (minTileDpi == null || minTileDpi <= 0) {
+      return null
     }
 
     val metrics = context.resources.displayMetrics
@@ -199,7 +210,6 @@ class ComposeSubsamplingScaleImageState(
           .inputStream
           .use { inputStream -> decodeImageDimensions(inputStream) }
       }
-
     }
 
     val imageDimensions = if (imageDimensionsInfoResult.isFailure) {
@@ -237,19 +247,17 @@ class ComposeSubsamplingScaleImageState(
       fullImageSampleSizeState.value /= 2
     }
 
-    if (debug) {
-      logcat { "initialize() fullImageSampleSizeState=${fullImageSampleSizeState.value}" }
-      logcat { "initialiseTileMap maxTileDimensions=${maxMaxTileSizeInfo.width}x${maxMaxTileSizeInfo.height}" }
-    }
+    tileMap.clear()
 
     initialiseTileMap(
       sourceWidth = imageDimensions.width,
       sourceHeight = imageDimensions.height,
-      maxTileWidth = maxMaxTileSizeInfo.width,
-      maxTileHeight = maxMaxTileSizeInfo.height,
-      availableWidth = availableWidth,
-      availableHeight = availableHeight,
-      fullImageSampleSize = fullImageSampleSizeState.value
+      maxTileWidth = maxTileSizeInfo.width,
+      maxTileHeight = maxTileSizeInfo.height,
+      availableWidth = viewWidth,
+      availableHeight = viewHeight,
+      fullImageSampleSize = fullImageSampleSizeState.value,
+      inTileMap = tileMap
     )
 
     if (debug) {
@@ -404,8 +412,8 @@ class ComposeSubsamplingScaleImageState(
 
       val refreshTilesResult = refreshRequiredTilesInternal(
         load = load,
-        sourceWidth = sourceWidth,
-        sourceHeight = sourceHeight,
+        sourceWidth = sWidth,
+        sourceHeight = sHeight,
         fullImageSampleSize = fullImageSampleSizeState.value,
         scale = scaleState.value
       )
@@ -483,9 +491,9 @@ class ComposeSubsamplingScaleImageState(
 
   private fun tileVisible(tile: Tile): Boolean {
     val sVisLeft = viewToSourceX(0f)
-    val sVisRight = viewToSourceX(availableWidth.toFloat())
+    val sVisRight = viewToSourceX(viewWidth.toFloat())
     val sVisTop = viewToSourceY(0f)
-    val sVisBottom = viewToSourceY(availableHeight.toFloat())
+    val sVisBottom = viewToSourceY(viewHeight.toFloat())
 
     return !(sVisLeft > tile.sourceRect.right
       || tile.sourceRect.left > sVisRight
@@ -495,29 +503,31 @@ class ComposeSubsamplingScaleImageState(
   }
 
   private fun viewToSourceX(vx: Float): Float {
-    return (vx - screenTranslate.x) / scaleState.value
+    return (vx - vTranslate.x) / scaleState.value
   }
 
   private fun viewToSourceY(vy: Float): Float {
-    return (vy - screenTranslate.y) / scaleState.value
+    return (vy - vTranslate.y) / scaleState.value
   }
 
   fun sourceToViewX(sx: Float): Float {
-    return sx * scaleState.value + screenTranslate.x
+    return (sx * scaleState.value) + vTranslate.x
   }
 
   fun sourceToViewY(sy: Float): Float {
-    return sy * scaleState.value + screenTranslate.y
+    return (sy * scaleState.value) + vTranslate.y
   }
 
   internal fun calculateInSampleSize(sourceWidth: Int, sourceHeight: Int, scale: Float): Int {
     var modifiedScale = scale
 
-    if (minTileDpi > 0) {
-      val metrics: DisplayMetrics = getResources().displayMetrics
-      val averageDpi = (metrics.xdpi + metrics.ydpi) / 2
-      modifiedScale *= (minTileDpi / averageDpi)
-    }
+    minTileDpi
+      ?.takeIf { dpi -> dpi > 0 }
+      ?.let { dpi ->
+        val metrics: DisplayMetrics = getResources().displayMetrics
+        val averageDpi = (metrics.xdpi + metrics.ydpi) / 2
+        modifiedScale *= (dpi / averageDpi)
+      }
 
     val reqWidth = (sourceWidth * modifiedScale).toInt()
     val reqHeight = (sourceHeight * modifiedScale).toInt()
@@ -544,9 +554,18 @@ class ComposeSubsamplingScaleImageState(
     maxTileHeight: Int,
     availableWidth: Int,
     availableHeight: Int,
-    fullImageSampleSize: Int
+    fullImageSampleSize: Int,
+    inTileMap: LinkedHashMap<Int, MutableList<Tile>>
   ) {
-    tileMap.clear()
+    if (debug) {
+      logcat {
+        "initialiseTileMap() sourceWidth=${sourceWidth}, sourceHeight=${sourceHeight}, " +
+          "maxTileWidth=${maxTileWidth}, maxTileHeight=${maxTileHeight}, " +
+          "availableWidth=${availableWidth}, availableHeight=${availableHeight}, " +
+          "fullImageSampleSize=${fullImageSampleSize}"
+      }
+    }
+
     var sampleSize = fullImageSampleSize
     var xTiles = 1
     var yTiles = 1
@@ -597,7 +616,7 @@ class ComposeSubsamplingScaleImageState(
         }
       }
 
-      tileMap[sampleSize] = tileGrid
+      inTileMap[sampleSize] = tileGrid
 
       if (sampleSize == 1) {
         break
@@ -605,57 +624,63 @@ class ComposeSubsamplingScaleImageState(
 
       sampleSize /= 2
     }
+
+    if (debug) {
+      inTileMap.entries.forEach { (sampleSize, tileLayer) ->
+        logcat { "initialiseTileMap() sampleSize=$sampleSize, tileLayerSize=${tileLayer.size}" }
+      }
+    }
   }
 
   fun fitToBounds(center: Boolean) {
     satTemp.scale = scaleState.value
-    satTemp.screenTranslate.set(
-      screenTranslate.x.toFloat(),
-      screenTranslate.y.toFloat()
+    satTemp.vTranslate.set(
+      vTranslate.x.toFloat(),
+      vTranslate.y.toFloat()
     )
 
     fitToBounds(center, satTemp)
 
     scaleState.value = satTemp.scale
-    screenTranslate.set(
-      satTemp.screenTranslate.x.toInt(),
-      satTemp.screenTranslate.y.toInt()
+    vTranslate.set(
+      satTemp.vTranslate.x.toInt(),
+      satTemp.vTranslate.y.toInt()
     )
 
     if (needInitScreenTranslate) {
       needInitScreenTranslate = false
 
-      screenTranslate.set(
+      vTranslate.set(
         vTranslateForSCenter(
-          sCenterX = (sourceWidth / 2).toFloat(),
-          sCenterY = (sourceHeight / 2).toFloat(),
+          sCenterX = (sWidth / 2).toFloat(),
+          sCenterY = (sHeight / 2).toFloat(),
           scale = scaleState.value
         )
       )
     }
   }
 
-  private fun fitToBounds(shouldCenter: Boolean, sat: ScaleAndTranslate) {
+  internal fun fitToBounds(shouldCenter: Boolean, sat: ScaleAndTranslate) {
     var center = shouldCenter
 //    if (panLimit == PAN_LIMIT_OUTSIDE && isReady()) {
 //      center = false
 //    }
 
-    check(availableWidth > 0) { "Bad availableWidth" }
-    check(availableHeight > 0) { "Bad availableHeight" }
+    check(viewWidth > 0) { "Bad availableWidth" }
+    check(viewHeight > 0) { "Bad availableHeight" }
 
-    val vTranslate: PointF = sat.screenTranslate
+    val vTranslate: PointF = sat.vTranslate
     val scale: Float = limitedScale(sat.scale)
-    val scaleWidth: Float = scale * sourceWidth
-    val scaleHeight: Float = scale * sourceHeight
+    val scaleWidth: Float = scale * sWidth
+    val scaleHeight: Float = scale * sHeight
 
     /*if (panLimit == PAN_LIMIT_CENTER && isReady()) {
       vTranslate.x = Math.max(vTranslate.x, availableWidth / 2 - scaleWidth)
       vTranslate.y = Math.max(vTranslate.y, availableHeight / 2 - scaleHeight)
     } else */
     if (center) {
-      vTranslate.x = Math.max(vTranslate.x, availableWidth - scaleWidth)
-      vTranslate.y = Math.max(vTranslate.y, availableHeight - scaleHeight)
+      vTranslate.x = Math.max(vTranslate.x, viewWidth - scaleWidth)
+      vTranslate.y = Math.max(vTranslate.y, viewHeight - scaleHeight)
     } else {
       vTranslate.x = Math.max(vTranslate.x, -scaleWidth)
       vTranslate.y = Math.max(vTranslate.y, -scaleHeight)
@@ -684,35 +709,30 @@ class ComposeSubsamplingScaleImageState(
       maxTy = Math.max(0, availableHeight / 2).toFloat()
     } else */
     if (center) {
-      maxTx = Math.max(0f, (availableWidth - scaleWidth) * xPaddingRatio)
-      maxTy = Math.max(0f, (availableHeight - scaleHeight) * yPaddingRatio)
+      maxTx = Math.max(0f, (viewWidth - scaleWidth) * xPaddingRatio)
+      maxTy = Math.max(0f, (viewHeight - scaleHeight) * yPaddingRatio)
     } else {
-      maxTx = Math.max(0, availableWidth).toFloat()
-      maxTy = Math.max(0, availableHeight).toFloat()
+      maxTx = Math.max(0, viewWidth).toFloat()
+      maxTy = Math.max(0, viewHeight).toFloat()
     }
     vTranslate.x = Math.min(vTranslate.x, maxTx)
     vTranslate.y = Math.min(vTranslate.y, maxTy)
     sat.scale = scale
   }
 
-  private fun limitedScale(targetScale: Float): Float {
-    // TODO(KurobaEx): gotta limit it somehow
-//    check(minScale < maxScale) {
-//      "minScale must be less than maxScale! (minScale: ${minScale}, maxScale: ${maxScale})"
-//    }
-
+  fun limitedScale(targetScale: Float): Float {
     var resultScale = targetScale
     resultScale = Math.max(minScale, resultScale)
     resultScale = Math.min(maxScale, resultScale)
     return resultScale
   }
 
-  private fun calculateMaxScale(dpi: Int): Float {
+  private fun calculateMaxScale(dpi: Int?): Float {
     if (maxScaleParam != null) {
       return maxScaleParam
     }
 
-    if (dpi <= 0) {
+    if (dpi == null || dpi <= 0) {
       return defaultMaxScale
     }
 
@@ -726,41 +746,41 @@ class ComposeSubsamplingScaleImageState(
     val hPadding = 0
     val vPadding = 0
 
-    check(availableWidth > 0) { "availableWidth is zero" }
-    check(availableHeight > 0) { "availableHeight is zero" }
-    check(sourceWidth > 0) { "sourceWidth is zero" }
-    check(sourceHeight > 0) { "sourceHeight is zero" }
+    check(viewWidth > 0) { "availableWidth is zero" }
+    check(viewHeight > 0) { "availableHeight is zero" }
+    check(sWidth > 0) { "sourceWidth is zero" }
+    check(sHeight > 0) { "sourceHeight is zero" }
 
     if (minimumScaleType == MinimumScaleType.ScaleTypeCenterInside) {
       return Math.min(
-        (availableWidth - hPadding) / sourceWidth.toFloat(),
-        (availableHeight - vPadding) / sourceHeight.toFloat()
+        (viewWidth - hPadding) / sWidth.toFloat(),
+        (viewHeight - vPadding) / sHeight.toFloat()
       )
     } else if (minimumScaleType == MinimumScaleType.ScaleTypeCenterCrop) {
       return Math.max(
-        (availableWidth - hPadding) / sourceWidth.toFloat(),
-        (availableHeight - vPadding) / sourceHeight.toFloat()
+        (viewWidth - hPadding) / sWidth.toFloat(),
+        (viewHeight - vPadding) / sHeight.toFloat()
       )
     } else if (minimumScaleType == MinimumScaleType.ScaleTypeFitWidth) {
-      return (availableWidth - hPadding) / sourceWidth.toFloat()
+      return (viewWidth - hPadding) / sWidth.toFloat()
     } else if (minimumScaleType == MinimumScaleType.ScaleTypeFitHeight) {
-      return (availableHeight - vPadding) / sourceHeight.toFloat()
+      return (viewHeight - vPadding) / sHeight.toFloat()
     } else if (minimumScaleType == MinimumScaleType.ScaleTypeOriginalSize) {
       return 1f
     } else if (minimumScaleType == MinimumScaleType.ScaleTypeSmartFit) {
-      return if (sourceHeight > sourceWidth) {
+      return if (sHeight > sWidth) {
         // Fit to width
-        (availableWidth - hPadding) / sourceWidth.toFloat()
+        (viewWidth - hPadding) / sWidth.toFloat()
       } else {
         // Fit to height
-        (availableHeight - vPadding) / sourceHeight.toFloat()
+        (viewHeight - vPadding) / sHeight.toFloat()
       }
     } else if (minimumScaleType is MinimumScaleType.ScaleTypeCustom && (minScaleParam != null && minScaleParam > 0f)) {
       return minScaleParam
     } else {
       return Math.min(
-        (availableWidth - hPadding) / sourceWidth.toFloat(),
-        (availableHeight - vPadding) / sourceHeight.toFloat()
+        (viewWidth - hPadding) / sWidth.toFloat(),
+        (viewHeight - vPadding) / sHeight.toFloat()
       )
     }
   }
@@ -807,8 +827,8 @@ class ComposeSubsamplingScaleImageState(
   }
 
   fun getCenter(): PointF {
-    val mX: Int = availableWidth / 2
-    val mY: Int = availableHeight / 2
+    val mX: Int = viewWidth / 2
+    val mY: Int = viewHeight / 2
     return viewToSourceCoord(mX.toFloat(), mY.toFloat())
   }
 
@@ -846,24 +866,24 @@ class ComposeSubsamplingScaleImageState(
   ): PointF {
     val vTranslate = vTranslateForSCenter(sCenterX, sCenterY, scale)
 
-    val vxCenter: Int = availableWidth / 2
-    val vyCenter: Int = availableHeight / 2
+    val vxCenter: Int = viewWidth / 2
+    val vyCenter: Int = viewHeight / 2
 
     val sx = (vxCenter - vTranslate.x) / scale
     val sy = (vyCenter - vTranslate.y) / scale
-    sTarget[sx] = sy
+    sTarget.set(sx, sy)
     return sTarget
   }
 
   fun vTranslateForSCenter(sCenterX: Float, sCenterY: Float, scale: Float): PointF {
-    val vxCenter: Int = availableWidth / 2
-    val vyCenter: Int = availableHeight / 2
+    val vxCenter: Int = viewWidth / 2
+    val vyCenter: Int = viewHeight / 2
 
     satTemp.scale = scale
-    satTemp.screenTranslate.set(vxCenter - sCenterX * scale, vyCenter - sCenterY * scale)
+    satTemp.vTranslate.set(vxCenter - sCenterX * scale, vyCenter - sCenterY * scale)
 
     fitToBounds(true, satTemp)
-    return satTemp.screenTranslate
+    return satTemp.vTranslate
   }
 
   fun ease(gestureAnimationEasing: GestureAnimationEasing, time: Long, from: Float, change: Float, duration: Long): Float {
@@ -883,14 +903,14 @@ class ComposeSubsamplingScaleImageState(
     }
 
     val scale = scaleState.value
-    val scaleWidth: Float = scale * sourceWidth
-    val scaleHeight: Float = scale * sourceHeight
+    val scaleWidth: Float = scale * sWidth
+    val scaleHeight: Float = scale * sHeight
 
     return PanInfo(
-      top = Math.max(0f, -screenTranslate.y.toFloat()),
-      left = Math.max(0f, -screenTranslate.x.toFloat()),
-      bottom = Math.max(0f, scaleHeight + screenTranslate.y - availableHeight),
-      right = Math.max(0f, scaleWidth + screenTranslate.x - availableWidth),
+      top = Math.max(0f, -vTranslate.y.toFloat()),
+      left = Math.max(0f, -vTranslate.x.toFloat()),
+      bottom = Math.max(0f, scaleHeight + vTranslate.y - viewHeight),
+      right = Math.max(0f, scaleWidth + vTranslate.x - viewWidth),
       horizontalTolerance = horizontalTolerance,
       verticalTolerance = verticalTolerance
     )

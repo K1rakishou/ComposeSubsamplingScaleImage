@@ -17,8 +17,10 @@ import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.consumeAllChanges
 import androidx.compose.ui.input.pointer.consumePositionChange
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.util.fastAll
 import androidx.compose.ui.util.fastAny
+import androidx.compose.ui.util.fastFirstOrNull
 import androidx.compose.ui.util.fastForEach
 import com.github.k1rakishou.lib.ComposeSubsamplingScaleImageState
 import com.github.k1rakishou.lib.helpers.logcat
@@ -189,14 +191,17 @@ private suspend fun PointerInputScope.detectPanGestures(
       while (coroutineScope.isActive) {
         val pointerEvent = awaitPointerEvent(pass = PointerEventPass.Main)
         val pointerInputChange = pointerEvent.changes
-          .firstOrNull { it.id == firstDown.id }
+          .fastFirstOrNull { it.id == firstDown.id }
           ?: break
 
         if (pointerInputChange.changedToUpIgnoreConsumed()) {
           break
         }
 
-        panGestureDetector.onGestureUpdated(pointerInputChange)
+        if (pointerInputChange.positionChanged()) {
+          panGestureDetector.onGestureUpdated(pointerInputChange)
+        }
+
         pointerInputChange.consumeAllChanges()
         lastPointerInputChange = pointerInputChange
       }
@@ -271,14 +276,17 @@ private suspend fun PointerInputScope.detectZoomGestures(
       while (coroutineScope.isActive) {
         val pointerEvent = awaitPointerEvent(pass = PointerEventPass.Main)
         val pointerInputChange = pointerEvent.changes
-          .firstOrNull { it.id == secondDown.id }
+          .fastFirstOrNull { it.id == secondDown.id }
           ?: break
 
         if (pointerInputChange.changedToUpIgnoreConsumed()) {
           break
         }
 
-        zoomGestureDetector.onGestureUpdated(pointerInputChange)
+        if (pointerInputChange.positionChanged()) {
+          zoomGestureDetector.onGestureUpdated(pointerInputChange)
+        }
+
         pointerInputChange.consumeAllChanges()
         lastPointerInputChange = pointerInputChange
       }

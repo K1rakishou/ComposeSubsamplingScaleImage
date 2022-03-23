@@ -18,10 +18,8 @@ class PanGestureDetector(
 ) : GestureDetector(DetectorType.Pan, state.debug) {
   private val velocityTracker = VelocityTracker()
 
-  // vCenterStart
-  private val screenCenterStart = PointF(0f, 0f)
-  // vTranslateStart
-  private val screenTranslateStart = PointF(0f, 0f)
+  private val vCenterStart = PointF(0f, 0f)
+  private val vTranslateStart = PointF(0f, 0f)
 
   private val startOffset = PointF(0f, 0f)
 
@@ -43,10 +41,10 @@ class PanGestureDetector(
     velocityTracker.addPointerInputChange(pointerInputChange)
 
     startOffset.set(offset.x, offset.y)
-    screenCenterStart.set(offset.x, offset.y)
-    screenTranslateStart.set(
-      state.screenTranslate.x.toFloat(),
-      state.screenTranslate.y.toFloat()
+    vCenterStart.set(offset.x, offset.y)
+    vTranslateStart.set(
+      state.vTranslate.x.toFloat(),
+      state.vTranslate.y.toFloat()
     )
   }
 
@@ -56,27 +54,28 @@ class PanGestureDetector(
     val offset = pointerInputChange.position
     velocityTracker.addPointerInputChange(pointerInputChange)
 
-    val dx: Float = Math.abs(offset.x - screenCenterStart.x)
-    val dy: Float = Math.abs(offset.y - screenCenterStart.y)
+    val dx: Float = Math.abs(offset.x - vCenterStart.x)
+    val dy: Float = Math.abs(offset.y - vCenterStart.y)
 
     val minOffset: Float = density.density * 5
     if (dx > minOffset || dy > minOffset || isPanning) {
-      state.screenTranslate.set(
-        x = (screenTranslateStart.x + (offset.x - screenCenterStart.x)).toInt(),
-        y = (screenTranslateStart.y + (offset.y - screenCenterStart.y)).toInt()
+      state.vTranslate.set(
+        x = (vTranslateStart.x + (offset.x - vCenterStart.x)).toInt(),
+        y = (vTranslateStart.y + (offset.y - vCenterStart.y)).toInt()
       )
 
-      val lastX: Float = state.screenTranslate.x.toFloat()
-      val lastY: Float = state.screenTranslate.y.toFloat()
+      val lastX: Float = state.vTranslate.x.toFloat()
+      val lastY: Float = state.vTranslate.y.toFloat()
       state.fitToBounds(true)
-      val atXEdge = lastX != state.screenTranslate.x.toFloat()
-      val atYEdge = lastY != state.screenTranslate.y.toFloat()
+      val atXEdge = lastX != state.vTranslate.x.toFloat()
+      val atYEdge = lastY != state.vTranslate.y.toFloat()
       val edgeXSwipe = atXEdge && dx > dy && !isPanning
       val edgeYSwipe = atYEdge && dy > dx && !isPanning
-      val yPan = lastY == state.screenTranslate.y.toFloat() && dy > minOffset * 3
+      val yPan = lastY == state.vTranslate.y.toFloat() && dy > minOffset * 3
 
       if (!edgeXSwipe && !edgeYSwipe && (!atXEdge || !atYEdge || yPan || isPanning)) {
         isPanning = true
+        state.refreshRequiredTiles(load = false)
       }
     }
   }
@@ -117,8 +116,8 @@ class PanGestureDetector(
 
     super.onGestureEnded(canceled, pointerInputChange)
 
-    screenCenterStart.set(0f, 0f)
-    screenTranslateStart.set(0f, 0f)
+    vCenterStart.set(0f, 0f)
+    vTranslateStart.set(0f, 0f)
     startOffset.set(0f, 0f)
     isPanning = false
     animatingFling = false
@@ -145,16 +144,16 @@ class PanGestureDetector(
         val currentScale = state.currentScale
 
         val vTranslateEnd = PointF(
-          state.screenTranslate.x + (velocityX * 0.25f),
-          state.screenTranslate.y + (velocityY * 0.25f)
+          state.vTranslate.x + (velocityX * 0.25f),
+          state.vTranslate.y + (velocityY * 0.25f)
         )
-        val sCenterXEnd: Float = (state.availableWidth / 2 - vTranslateEnd.x) / currentScale
-        val sCenterYEnd: Float = (state.availableHeight / 2 - vTranslateEnd.y) / currentScale
+        val sCenterXEnd: Float = (state.viewWidth / 2 - vTranslateEnd.x) / currentScale
+        val sCenterYEnd: Float = (state.viewHeight / 2 - vTranslateEnd.y) / currentScale
 
         val sCenter = PointF(sCenterXEnd, sCenterYEnd)
 
-        val vxCenter = state.availableWidth / 2f
-        val vyCenter = state.availableHeight / 2f
+        val vxCenter = state.viewWidth / 2f
+        val vyCenter = state.viewHeight / 2f
 
         val vFocusStart = state.sourceToViewCoord(sCenter)
         val vFocusEnd = PointF(vxCenter, vyCenter)
@@ -193,8 +192,8 @@ class PanGestureDetector(
           duration = duration
         )
 
-        state.screenTranslate.xState.value -= (state.sourceToViewX(params.sCenterEnd.x) - vFocusNowX).toInt()
-        state.screenTranslate.yState.value -= (state.sourceToViewY(params.sCenterEnd.y) - vFocusNowY).toInt()
+        state.vTranslate.xState.value -= (state.sourceToViewX(params.sCenterEnd.x) - vFocusNowX).toInt()
+        state.vTranslate.yState.value -= (state.sourceToViewY(params.sCenterEnd.y) - vFocusNowY).toInt()
 
         state.fitToBounds(finished || startScale == endScale)
         state.refreshRequiredTiles(finished)
