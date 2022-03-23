@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.github.k1rakishou.lib.decoders.SkiaImageRegionDecoder
+import com.github.k1rakishou.lib.gestures.MultiTouchGestureDetector
 import com.github.k1rakishou.lib.gestures.PanGestureDetector
 import com.github.k1rakishou.lib.gestures.ZoomGestureDetector
 import com.github.k1rakishou.lib.gestures.composeSubsamplingScaleImageGestureDetector
@@ -188,6 +189,7 @@ fun ComposeSubsamplingScaleImage(
   val debugValues = remember { DebugValues(density) }
   val zoomGestureDetector = remember { ZoomGestureDetector(density, state) }
   val panGestureDetector = remember { PanGestureDetector(density, state) }
+  val multiTouchGestureDetector = remember { MultiTouchGestureDetector(density, state) }
 
   BoxWithConstraints(
     modifier = Modifier
@@ -195,7 +197,8 @@ fun ComposeSubsamplingScaleImage(
       .composeSubsamplingScaleImageGestureDetector(
         state = state,
         zoomGestureDetector = zoomGestureDetector,
-        panGestureDetector = panGestureDetector
+        panGestureDetector = panGestureDetector,
+        multiTouchGestureDetector = multiTouchGestureDetector
       )
   ) {
     val minWidthPx = with(density) { remember(key1 = minWidth) { minWidth.toPx().toInt() } }

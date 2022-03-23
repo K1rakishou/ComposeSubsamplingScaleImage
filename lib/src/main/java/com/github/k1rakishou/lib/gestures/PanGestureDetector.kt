@@ -12,6 +12,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 
+/**
+ * One finger pan gesture
+ * */
 class PanGestureDetector(
   private val density: Density,
   private val state: ComposeSubsamplingScaleImageState,
@@ -27,9 +30,10 @@ class PanGestureDetector(
   private var isPanning = false
   private var animatingFling = false
 
-  override fun onGestureStarted(pointerInputChange: PointerInputChange) {
-    super.onGestureStarted(pointerInputChange)
+  override fun onGestureStarted(pointerInputChanges: List<PointerInputChange>) {
+    super.onGestureStarted(pointerInputChanges)
 
+    val pointerInputChange = pointerInputChanges.first()
     coroutineScope?.cancel()
     coroutineScope = CoroutineScope(Dispatchers.Main)
 
@@ -48,16 +52,17 @@ class PanGestureDetector(
     )
   }
 
-  override fun onGestureUpdated(pointerInputChange: PointerInputChange) {
-    super.onGestureUpdated(pointerInputChange)
+  override fun onGestureUpdated(pointerInputChanges: List<PointerInputChange>) {
+    super.onGestureUpdated(pointerInputChanges)
 
+    val pointerInputChange = pointerInputChanges.first()
     val offset = pointerInputChange.position
-    velocityTracker.addPointerInputChange(pointerInputChange)
-
     val dx: Float = Math.abs(offset.x - vCenterStart.x)
     val dy: Float = Math.abs(offset.y - vCenterStart.y)
-
     val minOffset: Float = density.density * 5
+
+    velocityTracker.addPointerInputChange(pointerInputChange)
+
     if (dx > minOffset || dy > minOffset || isPanning) {
       state.vTranslate.set(
         (vTranslateStart.x + (offset.x - vCenterStart.x)),
@@ -81,11 +86,13 @@ class PanGestureDetector(
     }
   }
 
-  override fun onGestureEnded(canceled: Boolean, pointerInputChange: PointerInputChange) {
-    velocityTracker.addPointerInputChange(pointerInputChange)
+  override fun onGestureEnded(canceled: Boolean, pointerInputChanges: List<PointerInputChange>) {
+    val pointerInputChange = pointerInputChanges.first()
     val endOffset = pointerInputChange.position
     val minVelocity = state.minFlingVelocityPxPerSecond
     val minDist = state.minFlingMoveDistPx
+
+    velocityTracker.addPointerInputChange(pointerInputChange)
 
     if (
       !animatingFling &&
@@ -106,7 +113,7 @@ class PanGestureDetector(
           debug = debug,
           velocityX = velocity.x,
           velocityY = velocity.y,
-          pointerInputChange = pointerInputChange
+          pointerInputChanges = pointerInputChanges
         )
 
         return
@@ -115,7 +122,7 @@ class PanGestureDetector(
       // fallthrough
     }
 
-    super.onGestureEnded(canceled, pointerInputChange)
+    super.onGestureEnded(canceled, pointerInputChanges)
 
     vCenterStart.set(0f, 0f)
     vTranslateStart.set(0f, 0f)
@@ -134,7 +141,7 @@ class PanGestureDetector(
     debug: Boolean,
     velocityX: Float,
     velocityY: Float,
-    pointerInputChange: PointerInputChange
+    pointerInputChanges: List<PointerInputChange>
   ) {
     currentGestureAnimation = GestureAnimation<PanAnimationParameters>(
       debug = debug,
@@ -204,7 +211,7 @@ class PanGestureDetector(
       onAnimationEnd = { canceled ->
         onGestureEnded(
           canceled = canceled,
-          pointerInputChange = pointerInputChange
+          pointerInputChanges = pointerInputChanges
         )
 
         animatingFling = false

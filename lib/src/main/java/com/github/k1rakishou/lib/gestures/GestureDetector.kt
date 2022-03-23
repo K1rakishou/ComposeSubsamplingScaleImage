@@ -21,21 +21,21 @@ abstract class GestureDetector(
   }
 
   @CallSuper
-  open fun onGestureStarted(pointerInputChange: PointerInputChange) {
+  open fun onGestureStarted(pointerInputChanges: List<PointerInputChange>) {
     if (debug) {
       logcat(tag = TAG) { "onGestureStarted() detectorType=${detectorType}" }
     }
   }
 
   @CallSuper
-  open fun onGestureUpdated(pointerInputChange: PointerInputChange) {
+  open fun onGestureUpdated(pointerInputChanges: List<PointerInputChange>) {
     if (debug) {
       logcat(tag = TAG) { "onGestureUpdated() detectorType=${detectorType}" }
     }
   }
 
   @CallSuper
-  open fun onGestureEnded(canceled: Boolean, pointerInputChange: PointerInputChange) {
+  open fun onGestureEnded(canceled: Boolean, pointerInputChanges: List<PointerInputChange>) {
     if (debug) {
       logcat(tag = TAG) { "onGestureEnded() canceled=$canceled, detectorType=${detectorType}" }
     }
@@ -48,5 +48,6 @@ abstract class GestureDetector(
 
 enum class DetectorType(val index: Int) {
   Zoom(0),
-  Pan(1)
+  Pan(1),
+  MultiTouch(2)
 }

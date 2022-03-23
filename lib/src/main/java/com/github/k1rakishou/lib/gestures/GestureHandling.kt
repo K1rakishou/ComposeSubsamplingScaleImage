@@ -9,6 +9,7 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.changedToDown
@@ -37,7 +38,8 @@ private const val TAG = "ComposeSubsamplingScaleImageGestures"
 fun Modifier.composeSubsamplingScaleImageGestureDetector(
   state: ComposeSubsamplingScaleImageState,
   zoomGestureDetector: ZoomGestureDetector? = null,
-  panGestureDetector: PanGestureDetector? = null
+  panGestureDetector: PanGestureDetector? = null,
+  multiTouchGestureDetector: MultiTouchGestureDetector? = null
 ) = composed(
   inspectorInfo = {
     name = "composeSubsamplingScaleImageGestureDetector"
@@ -49,7 +51,8 @@ fun Modifier.composeSubsamplingScaleImageGestureDetector(
         processGestures(
           state = state,
           zoomGestureDetector = zoomGestureDetector,
-          panGestureDetector = panGestureDetector
+          panGestureDetector = panGestureDetector,
+          multiTouchGestureDetector = multiTouchGestureDetector
         )
       }
     )
@@ -59,7 +62,8 @@ fun Modifier.composeSubsamplingScaleImageGestureDetector(
 private suspend fun PointerInputScope.processGestures(
   state: ComposeSubsamplingScaleImageState,
   zoomGestureDetector: ZoomGestureDetector?,
-  panGestureDetector: PanGestureDetector?
+  panGestureDetector: PanGestureDetector?,
+  multiTouchGestureDetector: MultiTouchGestureDetector?
 ) {
   val quickZoomTimeoutMs = state.quickZoomTimeoutMs
   val activeDetectorJobs = arrayOfNulls<Job?>(DetectorType.values().size)
@@ -85,6 +89,18 @@ private suspend fun PointerInputScope.processGestures(
     }
 
     coroutineScope {
+      activeDetectorJobs[DetectorType.MultiTouch.index] = launch {
+        detectMultiTouchGestures(
+          state = state,
+          multiTouchGestureDetector = multiTouchGestureDetector,
+          coroutineScope = this,
+          detectorType = DetectorType.MultiTouch,
+          cancelAnimations = { allDetectors.fastForEach { detector -> detector.cancelAnimation() } },
+          stopOtherDetectors = { detectorType -> stopOtherDetectors(detectorType) },
+          gesturesLocked = { allDetectors.fastAny { detector -> detector.animating } }
+        )
+      }
+
       activeDetectorJobs[DetectorType.Zoom.index] = launch {
         detectZoomGestures(
           quickZoomTimeoutMs = quickZoomTimeoutMs,
@@ -186,10 +202,11 @@ private suspend fun PointerInputScope.detectPanGestures(
 
     try {
       stopOtherDetectors(detectorType)
-      panGestureDetector.onGestureStarted(firstDown)
+      panGestureDetector.onGestureStarted(listOf(firstDown))
 
       while (coroutineScope.isActive) {
         val pointerEvent = awaitPointerEvent(pass = PointerEventPass.Main)
+
         val pointerInputChange = pointerEvent.changes
           .fastFirstOrNull { it.id == firstDown.id }
           ?: break
@@ -199,7 +216,7 @@ private suspend fun PointerInputScope.detectPanGestures(
         }
 
         if (pointerInputChange.positionChanged()) {
-          panGestureDetector.onGestureUpdated(pointerInputChange)
+          panGestureDetector.onGestureUpdated(listOf(pointerInputChange))
         }
 
         pointerInputChange.consumeAllChanges()
@@ -211,7 +228,103 @@ private suspend fun PointerInputScope.detectPanGestures(
     } finally {
       panGestureDetector.onGestureEnded(
         canceled = canceled,
-        pointerInputChange = lastPointerInputChange
+        pointerInputChanges = listOf(lastPointerInputChange)
+      )
+    }
+  }
+}
+
+private suspend fun PointerInputScope.detectMultiTouchGestures(
+  state: ComposeSubsamplingScaleImageState,
+  multiTouchGestureDetector: MultiTouchGestureDetector?,
+  coroutineScope: CoroutineScope,
+  detectorType: DetectorType,
+  cancelAnimations: () -> Unit,
+  stopOtherDetectors: (DetectorType) -> Unit,
+  gesturesLocked: () -> Boolean
+) {
+  while (coroutineScope.isActive) {
+    val initialPointerEvent = awaitPointerEventScope {
+      awaitPointerEvent(pass = PointerEventPass.Initial)
+    }
+
+    if (multiTouchGestureDetector == null) {
+      return
+    }
+
+    cancelAnimations()
+
+    if (gesturesLocked()) {
+      initialPointerEvent.changes.fastForEach { it.consumeAllChanges() }
+
+      awaitPointerEventScope {
+        consumeChangesUntilAllPointersAreUp(
+          gestureDetector = multiTouchGestureDetector,
+          pointerInputChange = null,
+          coroutineScope = coroutineScope,
+          gesturesLocked = gesturesLocked
+        )
+      }
+
+      return
+    }
+
+    val pointersCount = initialPointerEvent.changes.count { it.pressed }
+    if (pointersCount <= 1) {
+      continue
+    }
+
+    val twoMostRecentEvents = initialPointerEvent.changes
+      .filter { it.pressed }
+      .sortedByDescending { it.uptimeMillis }
+      .take(2)
+
+    if (twoMostRecentEvents.size != 2) {
+      continue
+    }
+
+    multiTouchGestureDetector.onGestureStarted(twoMostRecentEvents)
+
+    stopOtherDetectors(detectorType)
+    initialPointerEvent.changes.fastForEach { it.consumeAllChanges() }
+
+    var firstPointerChange = twoMostRecentEvents[0]
+    var secondPointerChange = twoMostRecentEvents[1]
+
+    val firstEventId = firstPointerChange.id
+    val secondEventId = secondPointerChange.id
+
+    var lastPointerInputChanges = twoMostRecentEvents
+    var canceled = false
+
+    try {
+      awaitPointerEventScope {
+        while (coroutineScope.isActive) {
+          val pointerEvent = awaitPointerEvent(pass = PointerEventPass.Main)
+          if (pointerEvent.type != PointerEventType.Move) {
+            break
+          }
+
+          pointerEvent.changes.fastForEach { it.consumeAllChanges() }
+
+          firstPointerChange = pointerEvent.changes.fastFirstOrNull { it.id == firstEventId } ?: break
+          secondPointerChange = pointerEvent.changes.fastFirstOrNull { it.id == secondEventId } ?: break
+
+          val twoInputChanges = listOf(firstPointerChange, secondPointerChange)
+          lastPointerInputChanges = twoInputChanges
+
+          multiTouchGestureDetector.onGestureUpdated(twoInputChanges)
+        }
+      }
+
+      break
+    } catch (error: Throwable) {
+      canceled = error is CancellationException
+      throw error
+    } finally {
+      multiTouchGestureDetector.onGestureEnded(
+        canceled = canceled,
+        pointerInputChanges = lastPointerInputChanges
       )
     }
   }
@@ -271,10 +384,11 @@ private suspend fun PointerInputScope.detectZoomGestures(
 
     try {
       stopOtherDetectors(detectorType)
-      zoomGestureDetector.onGestureStarted(secondDown)
+      zoomGestureDetector.onGestureStarted(listOf(secondDown))
 
       while (coroutineScope.isActive) {
         val pointerEvent = awaitPointerEvent(pass = PointerEventPass.Main)
+
         val pointerInputChange = pointerEvent.changes
           .fastFirstOrNull { it.id == secondDown.id }
           ?: break
@@ -284,7 +398,7 @@ private suspend fun PointerInputScope.detectZoomGestures(
         }
 
         if (pointerInputChange.positionChanged()) {
-          zoomGestureDetector.onGestureUpdated(pointerInputChange)
+          zoomGestureDetector.onGestureUpdated(listOf(pointerInputChange))
         }
 
         pointerInputChange.consumeAllChanges()
@@ -296,7 +410,7 @@ private suspend fun PointerInputScope.detectZoomGestures(
     } finally {
       zoomGestureDetector.onGestureEnded(
         canceled = canceled,
-        pointerInputChange = lastPointerInputChange
+        pointerInputChanges = listOf(lastPointerInputChange)
       )
     }
   }
@@ -304,7 +418,7 @@ private suspend fun PointerInputScope.detectZoomGestures(
 
 private suspend fun AwaitPointerEventScope.consumeChangesUntilAllPointersAreUp(
   gestureDetector: GestureDetector,
-  pointerInputChange: PointerInputChange,
+  pointerInputChange: PointerInputChange?,
   coroutineScope: CoroutineScope,
   gesturesLocked: () -> Boolean
 ) {
@@ -312,7 +426,7 @@ private suspend fun AwaitPointerEventScope.consumeChangesUntilAllPointersAreUp(
     logcat(tag = TAG) { "Gestures locked detectorType=${gestureDetector.detectorType}" }
   }
 
-  pointerInputChange.consumeAllChanges()
+  pointerInputChange?.consumeAllChanges()
 
   while (coroutineScope.isActive && gesturesLocked()) {
     val event = awaitPointerEvent(pass = PointerEventPass.Main)

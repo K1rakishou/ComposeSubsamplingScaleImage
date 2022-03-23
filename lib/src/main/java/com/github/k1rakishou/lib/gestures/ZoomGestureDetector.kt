@@ -15,6 +15,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 
+/**
+ * One finger quick scale gesture or double-tap zoom gesture
+ * */
 class ZoomGestureDetector(
   private val density: Density,
   private val state: ComposeSubsamplingScaleImageState,
@@ -40,12 +43,13 @@ class ZoomGestureDetector(
 
   private var coroutineScope: CoroutineScope? = null
 
-  override fun onGestureStarted(pointerInputChange: PointerInputChange) {
-    super.onGestureStarted(pointerInputChange)
+  override fun onGestureStarted(pointerInputChanges: List<PointerInputChange>) {
+    super.onGestureStarted(pointerInputChanges)
 
     coroutineScope?.cancel()
     coroutineScope = CoroutineScope(Dispatchers.Main)
 
+    val pointerInputChange = pointerInputChanges.first()
     val offset = pointerInputChange.position
     val currentScale = state.currentScale
     val screenTranslateX = state.vTranslate.x
@@ -60,19 +64,19 @@ class ZoomGestureDetector(
     quickScaleVLastPoint.set(quickScaleSCenter.x, quickScaleSCenter.y)
   }
 
-  override fun onGestureEnded(canceled: Boolean, pointerInputChange: PointerInputChange) {
+  override fun onGestureEnded(canceled: Boolean, pointerInputChanges: List<PointerInputChange>) {
     if (!animatingQuickZoom && !quickScaleMoved && coroutineScope != null) {
       if (currentGestureAnimation != null) {
         return
       }
 
       animatingQuickZoom = true
-      initAndStartQuickZoomAnimation(debug, pointerInputChange)
+      initAndStartQuickZoomAnimation(debug, pointerInputChanges)
 
       return
     }
 
-    super.onGestureEnded(canceled, pointerInputChange)
+    super.onGestureEnded(canceled, pointerInputChanges)
 
     vCenterStart.set(0f, 0f)
     vTranslateStart.set(0f, 0f)
@@ -97,9 +101,10 @@ class ZoomGestureDetector(
     coroutineScope = null
   }
 
-  override fun onGestureUpdated(pointerInputChange: PointerInputChange) {
-    super.onGestureUpdated(pointerInputChange)
+  override fun onGestureUpdated(pointerInputChanges: List<PointerInputChange>) {
+    super.onGestureUpdated(pointerInputChanges)
 
+    val pointerInputChange = pointerInputChanges.first()
     val offset = pointerInputChange.position
     var dist = Math.abs(quickScaleVStart.y - offset.y) * 2 + quickScaleThreshold
 
@@ -222,7 +227,8 @@ class ZoomGestureDetector(
     }
   }
 
-  private fun initAndStartQuickZoomAnimation(debug: Boolean, pointerInputChange: PointerInputChange) {
+  private fun initAndStartQuickZoomAnimation(debug: Boolean, pointerInputChanges: List<PointerInputChange>) {
+    val pointerInputChange = pointerInputChanges.first()
     val offset = pointerInputChange.position
     val vTranslateX = state.vTranslate.x
     val vTranslateY = state.vTranslate.y
@@ -347,7 +353,7 @@ class ZoomGestureDetector(
       onAnimationEnd = { canceled ->
         onGestureEnded(
           canceled = canceled,
-          pointerInputChange = pointerInputChange
+          pointerInputChanges = pointerInputChanges
         )
 
         animatingQuickZoom = false

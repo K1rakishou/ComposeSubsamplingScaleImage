@@ -81,3 +81,9 @@ inline fun <T> Collection<T>?.isNotNullNorEmpty(): Boolean {
 
   return this != null && this.size > 0
 }
+
+fun distance(x0: Float, x1: Float, y0: Float, y1: Float): Float {
+  val x = x0 - x1
+  val y = y0 - y1
+  return Math.sqrt((x * x + y * y).toDouble()).toFloat()
+}
