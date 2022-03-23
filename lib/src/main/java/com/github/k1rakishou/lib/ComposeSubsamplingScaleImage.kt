@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.NativeCanvas
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
@@ -30,7 +31,7 @@ import com.github.k1rakishou.lib.decoders.SkiaImageRegionDecoder
 import com.github.k1rakishou.lib.gestures.MultiTouchGestureDetector
 import com.github.k1rakishou.lib.gestures.PanGestureDetector
 import com.github.k1rakishou.lib.gestures.ZoomGestureDetector
-import com.github.k1rakishou.lib.gestures.composeSubsamplingScaleImageGestureDetector
+import com.github.k1rakishou.lib.gestures.processGestures
 import com.github.k1rakishou.lib.helpers.isAndroid11
 import java.util.Locale
 import java.util.concurrent.Executors
@@ -83,6 +84,11 @@ private val tileDebugColors by lazy {
  * [debug] enables/disables internal logging
  * [decoderDispatcherLazy] the coroutine dispatcher that will be used to decode images.
  * [imageDecoderProvider] the bitmap decoder that does the job
+ * [parentScrollableContainer] If you put inside of a scrollable container you need to specify this
+ * parameter (depending on what scroll direction the container has like if it's HorizontalPager/lazyRow
+ * then it's Horizontal, if it's VerticalPager/LazyColumn then it's vertical, if it's not inside of
+ * any scrollable container then null) so that ComposeSubsamplingScaleImage can allow that container
+ * to scroll when it's completely zoomed out or touching certain side(s) of the container.
  * */
 @Composable
 fun rememberComposeSubsamplingScaleImageState(
@@ -96,6 +102,7 @@ fun rememberComposeSubsamplingScaleImageState(
   doubleTapZoomDpiDefault: Int? = 160,
   maxMaxTileSizeInfo: () -> MaxTileSizeInfo = { MaxTileSizeInfo.Auto() },
   minimumScaleType: () -> MinimumScaleType = { MinimumScaleType.ScaleTypeCenterInside },
+  parentScrollableContainer: ParentScrollableContainer? = null,
   minScale: Float? = null,
   maxScale: Float? = null,
   debug: Boolean = false,
@@ -159,7 +166,8 @@ fun rememberComposeSubsamplingScaleImageState(
       flingAnimationDurationMs = flingAnimationDurationMs,
       minDpiDefault = minDpi,
       minTileDpiDefault = minTileDpi,
-      doubleTapZoomDpiDefault = doubleTapZoomDpiDefault
+      doubleTapZoomDpiDefault = doubleTapZoomDpiDefault,
+      parentScrollableContainer = parentScrollableContainer
     )
   }
 }
@@ -194,12 +202,16 @@ fun ComposeSubsamplingScaleImage(
   BoxWithConstraints(
     modifier = Modifier
       .fillMaxSize()
-      .composeSubsamplingScaleImageGestureDetector(
-        state = state,
-        zoomGestureDetector = zoomGestureDetector,
-        panGestureDetector = panGestureDetector,
-        multiTouchGestureDetector = multiTouchGestureDetector
-      )
+      .pointerInput(
+        key1 = Unit,
+        block = {
+          processGestures(
+            state = state,
+            zoomGestureDetector = zoomGestureDetector,
+            panGestureDetector = panGestureDetector,
+            multiTouchGestureDetector = multiTouchGestureDetector
+          )
+        })
   ) {
     val minWidthPx = with(density) { remember(key1 = minWidth) { minWidth.toPx().toInt() } }
     val minHeightPx = with(density) { remember(key1 = minHeight) { minHeight.toPx().toInt() } }
@@ -375,7 +387,7 @@ private fun DrawScope.DrawTileGrid(
               ?: tileDebugColors.last()
 
             drawRect(
-              color = color.copy(alpha = 0.15f),
+              color = color.copy(alpha = 0.3f),
               topLeft = tile.screenRect.topLeft,
               size = tile.screenRect.size
             )
@@ -452,14 +464,10 @@ private fun DrawScope.drawTileDebugInfo(
     val debugText = buildString {
       append("VIS@")
       append(tile.sampleSize)
-      append(" RECT (")
-      append(tile.sourceRect.top)
-      append(",")
-      append(tile.sourceRect.left)
-      append(",")
-      append(tile.sourceRect.bottom)
-      append(",")
-      append(tile.sourceRect.right)
+      append(" ")
+      append(tile.sourceRect.width)
+      append("x")
+      append(tile.sourceRect.height)
       append(")")
     }
 
@@ -473,14 +481,10 @@ private fun DrawScope.drawTileDebugInfo(
     val debugText = buildString {
       append("INV@")
       append(tile.sampleSize)
-      append(" RECT (")
-      append(tile.sourceRect.top)
-      append(",")
-      append(tile.sourceRect.left)
-      append(",")
-      append(tile.sourceRect.bottom)
-      append(",")
-      append(tile.sourceRect.right)
+      append(" ")
+      append(tile.sourceRect.width)
+      append("x")
+      append(tile.sourceRect.height)
       append(")")
     }
 

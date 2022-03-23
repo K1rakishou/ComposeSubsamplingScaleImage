@@ -16,6 +16,12 @@ internal data class RectMut(
   var size: Size = Size.Zero
     private set
 
+  val width: Int
+    get() = size.width.toInt()
+  val height: Int
+    get() = size.height.toInt()
+
+
   init {
     onUpdated()
   }

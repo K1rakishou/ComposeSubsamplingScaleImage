@@ -37,7 +37,7 @@ import kotlinx.coroutines.withContext
 
 internal val maximumBitmapSizeState = mutableStateOf<IntSize?>(null)
 
-class ComposeSubsamplingScaleImageState(
+class ComposeSubsamplingScaleImageState internal constructor(
   val context: Context,
   val maxTileSizeInfo: MaxTileSizeInfo,
   val minimumScaleType: MinimumScaleType,
@@ -55,6 +55,7 @@ class ComposeSubsamplingScaleImageState(
   val minDpiDefault: Int?,
   val minTileDpiDefault: Int?,
   val doubleTapZoomDpiDefault: Int?,
+  val parentScrollableContainer: ParentScrollableContainer?
 ) : RememberObserver {
   private val decoderDispatcher by decoderDispatcherLazy
   private lateinit var coroutineScope: CoroutineScope
