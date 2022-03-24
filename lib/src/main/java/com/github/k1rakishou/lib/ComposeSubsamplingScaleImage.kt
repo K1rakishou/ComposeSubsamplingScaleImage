@@ -1,6 +1,7 @@
 package com.github.k1rakishou.lib
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Paint
 import android.graphics.PointF
 import android.view.ViewConfiguration
@@ -42,7 +43,7 @@ private const val TAG = "ComposeSubsamplingScaleImage"
 
 private val defaultDecoderProvider = object : ImageDecoderProvider {
   override suspend fun provide(): ComposeSubsamplingScaleImageDecoder {
-    return SkiaImageRegionDecoder()
+    return SkiaImageRegionDecoder(bitmapConfig = Bitmap.Config.RGB_565)
   }
 }
 
@@ -64,7 +65,7 @@ private val tileDebugColors by lazy {
 
 /**
  * Note: fling animation is an animation that is executed after the finger stops moving on the screen.
- * This is basically the inertia scrolling animation.
+ * This is basically the scroll inertia.
  * Note: quick zoom animation is an animation that is executed after double-tapping (zoom in/zoom out).
  *
  * [minFlingMoveDistPx] how many pixels a finger must move before we start considering
@@ -75,7 +76,7 @@ private val tileDebugColors by lazy {
  * zoom gesture and we either run the quick zoom animation or the gesture becomes the single finger
  * zoom gesture.
  * [flingAnimationDurationMs] the duration of the fling animation
- * [maxMaxTileSizeInfo] the maximum size of a tile before we start subdividing it into smaller tiles.
+ * [maxMaxTileSize] the maximum size of a tile before we start subdividing it into smaller tiles.
  * The higher it is the better since we will have to decode less tiles which will make image region
  * loading faster (less regions to decode -> the faster it is). We can't set to be Int.MAX_VALUE or
  * some other big number because Canvas has internal limitations on the bitmap size.
@@ -84,7 +85,7 @@ private val tileDebugColors by lazy {
  * [debug] enables/disables internal logging
  * [decoderDispatcherLazy] the coroutine dispatcher that will be used to decode images.
  * [imageDecoderProvider] the bitmap decoder that does the job
- * [parentScrollableContainer] If you put inside of a scrollable container you need to specify this
+ * [scrollableContainerDirection] If you put inside of a scrollable container you need to specify this
  * parameter (depending on what scroll direction the container has like if it's HorizontalPager/lazyRow
  * then it's Horizontal, if it's VerticalPager/LazyColumn then it's vertical, if it's not inside of
  * any scrollable container then null) so that ComposeSubsamplingScaleImage can allow that container
@@ -100,19 +101,19 @@ fun rememberComposeSubsamplingScaleImageState(
   minDpi: Int? = 160,
   minTileDpi: Int? = null,
   doubleTapZoomDpiDefault: Int? = 160,
-  maxMaxTileSizeInfo: () -> MaxTileSizeInfo = { MaxTileSizeInfo.Auto() },
+  maxMaxTileSize: () -> MaxTileSize = { MaxTileSize.Auto() },
   minimumScaleType: () -> MinimumScaleType = { MinimumScaleType.ScaleTypeCenterInside },
-  parentScrollableContainer: ParentScrollableContainer? = null,
+  scrollableContainerDirection: ScrollableContainerDirection? = null,
   minScale: Float? = null,
   maxScale: Float? = null,
-  debug: Boolean = false,
   decoderDispatcherLazy: Lazy<CoroutineDispatcher> = defaultDecoderDispatcher,
-  imageDecoderProvider: ImageDecoderProvider = remember { defaultDecoderProvider }
+  imageDecoderProvider: ImageDecoderProvider = remember { defaultDecoderProvider },
+  debug: Boolean = false
 ): ComposeSubsamplingScaleImageState {
   val context = LocalContext.current
   val composeViewConfiguration = LocalViewConfiguration.current
 
-  val maxMaxTileSizeInfoRemembered = remember { maxMaxTileSizeInfo() }
+  val maxMaxTileSizeInfoRemembered = remember { maxMaxTileSize() }
   val minimumScaleTypeRemembered = remember { minimumScaleType() }
   val androidViewConfiguration = remember { ViewConfiguration.get(context) }
 
@@ -151,7 +152,7 @@ fun rememberComposeSubsamplingScaleImageState(
   return remember {
     ComposeSubsamplingScaleImageState(
       context = context,
-      maxTileSizeInfo = maxMaxTileSizeInfoRemembered,
+      maxTileSize = maxMaxTileSizeInfoRemembered,
       minimumScaleType = minimumScaleTypeRemembered,
       minScaleParam = minScale,
       maxScaleParam = maxScale,
@@ -167,7 +168,7 @@ fun rememberComposeSubsamplingScaleImageState(
       minDpiDefault = minDpi,
       minTileDpiDefault = minTileDpi,
       doubleTapZoomDpiDefault = doubleTapZoomDpiDefault,
-      parentScrollableContainer = parentScrollableContainer
+      scrollableContainerDirection = scrollableContainerDirection
     )
   }
 }
@@ -181,10 +182,10 @@ fun ComposeSubsamplingScaleImage(
   FullImageLoadingContent: (@Composable () -> Unit)? = null,
   FullImageErrorLoadingContent: (@Composable (Throwable) -> Unit)? = null
 ) {
-  if (state.maxTileSizeInfo is MaxTileSizeInfo.Auto) {
+  if (state.maxTileSize is MaxTileSize.Auto) {
     val detected = detectCanvasMaxBitmapSize(
       onBitmapSizeDetected = { bitmapSize ->
-        state.maxTileSizeInfo.maxTileSizeState.value = bitmapSize
+        state.maxTileSize.maxTileSizeState.value = bitmapSize
       }
     )
 

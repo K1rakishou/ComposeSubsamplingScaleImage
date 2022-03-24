@@ -14,8 +14,7 @@ import com.github.k1rakishou.lib.ComposeSubsamplingScaleImage
 import com.github.k1rakishou.lib.ComposeSubsamplingScaleImageEventListener
 import com.github.k1rakishou.lib.ComposeSubsamplingScaleImageSource
 import com.github.k1rakishou.lib.ImageSourceProvider
-import com.github.k1rakishou.lib.MaxTileSizeInfo
-import com.github.k1rakishou.lib.MinimumScaleType
+import com.github.k1rakishou.lib.ScrollableContainerDirection
 import com.github.k1rakishou.lib.helpers.logcat
 import com.github.k1rakishou.lib.helpers.logcatError
 import com.github.k1rakishou.lib.rememberComposeSubsamplingScaleImageState
@@ -24,8 +23,6 @@ import com.google.accompanist.pager.HorizontalPager
 import com.google.accompanist.pager.rememberPagerState
 import java.io.PrintWriter
 import java.io.StringWriter
-import java.util.concurrent.Executors
-import kotlinx.coroutines.asCoroutineDispatcher
 
 class MainActivity : ComponentActivity() {
   private val baseDir = "test_images"
@@ -97,20 +94,11 @@ class MainActivity : ComponentActivity() {
       }
     }
 
-    val decoderDispatcherLazy = remember {
-      lazy {
-        Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors())
-          .asCoroutineDispatcher()
-      }
-    }
-
     ComposeSubsamplingScaleImage(
       modifier = Modifier.fillMaxSize(),
       state = rememberComposeSubsamplingScaleImageState(
-        maxMaxTileSizeInfo = { MaxTileSizeInfo.Auto() },
-        minimumScaleType = { MinimumScaleType.ScaleTypeCenterInside },
         maxScale = 5f,
-        decoderDispatcherLazy = decoderDispatcherLazy,
+        scrollableContainerDirection = ScrollableContainerDirection.Horizontal,
         debug = true
       ),
       imageSourceProvider = imageSourceProvider,

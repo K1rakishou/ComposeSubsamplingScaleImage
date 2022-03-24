@@ -39,7 +39,7 @@ internal val maximumBitmapSizeState = mutableStateOf<IntSize?>(null)
 
 class ComposeSubsamplingScaleImageState internal constructor(
   val context: Context,
-  val maxTileSizeInfo: MaxTileSizeInfo,
+  val maxTileSize: MaxTileSize,
   val minimumScaleType: MinimumScaleType,
   val minScaleParam: Float?,
   val maxScaleParam: Float?,
@@ -55,7 +55,7 @@ class ComposeSubsamplingScaleImageState internal constructor(
   val minDpiDefault: Int?,
   val minTileDpiDefault: Int?,
   val doubleTapZoomDpiDefault: Int?,
-  val parentScrollableContainer: ParentScrollableContainer?
+  val scrollableContainerDirection: ScrollableContainerDirection?
 ) : RememberObserver {
   private val decoderDispatcher by decoderDispatcherLazy
   private lateinit var coroutineScope: CoroutineScope
@@ -263,8 +263,8 @@ class ComposeSubsamplingScaleImageState internal constructor(
     initialiseTileMap(
       sourceWidth = imageDimensions.width,
       sourceHeight = imageDimensions.height,
-      maxTileWidth = maxTileSizeInfo.width,
-      maxTileHeight = maxTileSizeInfo.height,
+      maxTileWidth = maxTileSize.width,
+      maxTileHeight = maxTileSize.height,
       availableWidth = viewWidth,
       availableHeight = viewHeight,
       fullImageSampleSize = fullImageSampleSizeState.value,

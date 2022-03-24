@@ -9,14 +9,15 @@ import androidx.compose.ui.unit.IntSize
 import com.github.k1rakishou.lib.ComposeSubsamplingScaleImageDecoder
 import com.github.k1rakishou.lib.helpers.Try
 import java.io.InputStream
-import java.util.concurrent.locks.ReadWriteLock
 import java.util.concurrent.locks.ReentrantReadWriteLock
+import kotlin.concurrent.read
+import kotlin.concurrent.write
 
 class SkiaImageRegionDecoder(
-  private val bitmapConfig: Bitmap.Config = Bitmap.Config.RGB_565
+  private val bitmapConfig: Bitmap.Config
 ) : ComposeSubsamplingScaleImageDecoder {
-  private var decoder: BitmapRegionDecoder? = null
-  private val decoderLock: ReadWriteLock = ReentrantReadWriteLock(true)
+  @Volatile private var decoder: BitmapRegionDecoder? = null
+  private val decoderLock = ReentrantReadWriteLock(true)
 
   override fun init(context: Context, inputStream: InputStream): Result<IntSize> {
     return Result.Try {
@@ -26,42 +27,30 @@ class SkiaImageRegionDecoder(
   }
 
   override fun decodeRegion(sRect: Rect, sampleSize: Int): Result<Bitmap> {
-    decoderLock.readLock().lock()
-
     return Result.Try {
-      try {
+      return@Try decoderLock.read {
         if (decoder != null && !decoder!!.isRecycled) {
           val options = Options()
           options.inSampleSize = sampleSize
           options.inPreferredConfig = bitmapConfig
 
-          val bitmap: Bitmap = decoder!!.decodeRegion(sRect, options)
-            ?: throw Exception("Failed to initialize image decoder: ${this.javaClass.simpleName}. Image format may not be supported")
-
-          bitmap
+          return@read decoder!!.decodeRegion(sRect, options)
+            ?: throw Exception("Failed to initialize image decoder: ${javaClass.simpleName}. Image format may not be supported")
         } else {
           throw IllegalStateException("Cannot decode region after decoder has been recycled")
         }
-      } finally {
-        decoderLock.readLock().unlock()
       }
     }
   }
 
-  @Synchronized
   override fun isReady(): Boolean {
     return decoder != null && !decoder!!.isRecycled
   }
 
-  @Synchronized
   override fun recycle() {
-    decoderLock.writeLock().lock()
-
-    try {
+    decoderLock.write {
       decoder?.recycle()
       decoder = null
-    } finally {
-      decoderLock.writeLock().unlock()
     }
   }
 

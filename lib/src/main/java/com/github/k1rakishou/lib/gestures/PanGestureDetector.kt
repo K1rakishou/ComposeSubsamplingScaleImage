@@ -6,6 +6,7 @@ import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.util.fastForEach
 import com.github.k1rakishou.lib.ComposeSubsamplingScaleImageState
 import kotlin.math.absoluteValue
 import kotlinx.coroutines.CoroutineScope
@@ -42,7 +43,9 @@ class PanGestureDetector(
 
     val offset = pointerInputChange.position
     velocityTracker.resetTracking()
-    velocityTracker.addPointerInputChange(pointerInputChange)
+    pointerInputChanges.fastForEach { pic ->
+      velocityTracker.addPointerInputChange(pic)
+    }
 
     startOffset.set(offset.x, offset.y)
     vCenterStart.set(offset.x, offset.y)
@@ -61,7 +64,9 @@ class PanGestureDetector(
     val dy: Float = Math.abs(offset.y - vCenterStart.y)
     val minOffset: Float = density.density * 5
 
-    velocityTracker.addPointerInputChange(pointerInputChange)
+    pointerInputChanges.fastForEach { pic ->
+      velocityTracker.addPointerInputChange(pic)
+    }
 
     if (dx > minOffset || dy > minOffset || isPanning) {
       state.vTranslate.set(
@@ -92,7 +97,9 @@ class PanGestureDetector(
     val minVelocity = state.minFlingVelocityPxPerSecond
     val minDist = state.minFlingMoveDistPx
 
-    velocityTracker.addPointerInputChange(pointerInputChange)
+    pointerInputChanges.fastForEach { pic ->
+      velocityTracker.addPointerInputChange(pic)
+    }
 
     if (
       !animatingFling &&

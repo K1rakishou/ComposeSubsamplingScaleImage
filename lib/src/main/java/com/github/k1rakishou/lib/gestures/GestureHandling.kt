@@ -1,6 +1,5 @@
 package com.github.k1rakishou.lib.gestures
 
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.forEachGesture
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -21,7 +20,7 @@ import androidx.compose.ui.util.fastAny
 import androidx.compose.ui.util.fastFirstOrNull
 import androidx.compose.ui.util.fastForEach
 import com.github.k1rakishou.lib.ComposeSubsamplingScaleImageState
-import com.github.k1rakishou.lib.ParentScrollableContainer
+import com.github.k1rakishou.lib.ScrollableContainerDirection
 import com.github.k1rakishou.lib.helpers.logcat
 import kotlin.math.absoluteValue
 import kotlinx.coroutines.CancellationException
@@ -63,17 +62,6 @@ internal suspend fun PointerInputScope.processGestures(
     }
 
     coroutineScope {
-      activeDetectorJobs[DetectorType.MultiTouch.index] = launch {
-        detectMultiTouchGestures(
-          multiTouchGestureDetector = multiTouchGestureDetector,
-          coroutineScope = this,
-          detectorType = DetectorType.MultiTouch,
-          cancelAnimations = { allDetectors.fastForEach { detector -> detector.cancelAnimation() } },
-          stopOtherDetectors = { detectorType -> stopOtherDetectors(detectorType) },
-          gesturesLocked = { allDetectors.fastAny { detector -> detector.animating } }
-        )
-      }
-
       activeDetectorJobs[DetectorType.Zoom.index] = launch {
         detectZoomGestures(
           quickZoomTimeoutMs = quickZoomTimeoutMs,
@@ -92,6 +80,17 @@ internal suspend fun PointerInputScope.processGestures(
           panGestureDetector = panGestureDetector,
           coroutineScope = this,
           detectorType = DetectorType.Pan,
+          cancelAnimations = { allDetectors.fastForEach { detector -> detector.cancelAnimation() } },
+          stopOtherDetectors = { detectorType -> stopOtherDetectors(detectorType) },
+          gesturesLocked = { allDetectors.fastAny { detector -> detector.animating } }
+        )
+      }
+
+      activeDetectorJobs[DetectorType.MultiTouch.index] = launch {
+        detectMultiTouchGestures(
+          multiTouchGestureDetector = multiTouchGestureDetector,
+          coroutineScope = this,
+          detectorType = DetectorType.MultiTouch,
           cancelAnimations = { allDetectors.fastForEach { detector -> detector.cancelAnimation() } },
           stopOtherDetectors = { detectorType -> stopOtherDetectors(detectorType) },
           gesturesLocked = { allDetectors.fastAny { detector -> detector.animating } }
@@ -134,24 +133,35 @@ private suspend fun PointerInputScope.detectPanGestures(
     }
 
     if (panGestureDetector.debug) {
-      logcat(tag = TAG) { "Gestures NOT locked, detectorType=${detectorType}" }
+      logcat(tag = TAG) { "pan() Gestures NOT locked, detectorType=${detectorType}" }
     }
 
     val panInfo = state.getPanInfo()
-      ?: return@awaitPointerEventScope
+    if (panInfo == null) {
+      if (panGestureDetector.debug) {
+        logcat(tag = TAG) { "pan() panInfo == null, detectorType=${detectorType}" }
+      }
+      return@awaitPointerEventScope
+    }
 
-    when (state.parentScrollableContainer) {
-      ParentScrollableContainer.Horizontal -> {
+    when (state.scrollableContainerDirection) {
+      ScrollableContainerDirection.Horizontal -> {
         // If we are inside of a horizontally scrollable container (LazyRow/HorizontalPager) and
         // we are touching both left and right sides of the screen then cancel this gesture and
         // allow parent container scrolling
         if (panInfo.touchesLeftAndRight()) {
+          if (panGestureDetector.debug) {
+            logcat(tag = TAG) { "pan() touchesLeftAndRight == true, detectorType=${detectorType}" }
+          }
           return@awaitPointerEventScope
         }
       }
-      ParentScrollableContainer.Vertical -> {
+      ScrollableContainerDirection.Vertical -> {
         // Same as Horizontal but for vertically scrollable container (LazyColumn/VerticalPager)
         if (panInfo.touchesTopAndBottom()) {
+          if (panGestureDetector.debug) {
+            logcat(tag = TAG) { "pan() touchesTopAndBottom == true, detectorType=${detectorType}" }
+          }
           return@awaitPointerEventScope
         }
       }
@@ -183,6 +193,13 @@ private suspend fun PointerInputScope.detectPanGestures(
     )
 
     if (skipThisGesture || touchSlop == null) {
+      if (panGestureDetector.debug) {
+        logcat(tag = TAG) {
+          "pan() awaitTouchSlopOrCancellation() failed " +
+            "(skipThisGesture=$skipThisGesture, touchSlop==null=${touchSlop == null}), " +
+            "detectorType=${detectorType}"
+        }
+      }
       return@awaitPointerEventScope
     }
 
@@ -233,7 +250,32 @@ private suspend fun PointerInputScope.detectMultiTouchGestures(
 ) {
   while (coroutineScope.isActive) {
     val initialPointerEvent = awaitPointerEventScope {
-      awaitPointerEvent(pass = PointerEventPass.Initial)
+      val initialPointerEvent = awaitPointerEvent(pass = PointerEventPass.Initial)
+
+      if (multiTouchGestureDetector == null) {
+        return@awaitPointerEventScope null
+      }
+
+      if (initialPointerEvent.changes.fastAll { it.changedToUpIgnoreConsumed() }) {
+        if (multiTouchGestureDetector.debug) {
+          logcat(tag = TAG) { "multi() initialPointerEvent.changes are all up, detectorType=${detectorType}" }
+        }
+        return@awaitPointerEventScope null
+      }
+
+      val pointersCount = initialPointerEvent.changes.count { it.pressed }
+      if (pointersCount <= 0) {
+        if (multiTouchGestureDetector.debug) {
+          logcat(tag = TAG) { "multi() pointersCount <= 0 (pointersCount=$pointersCount), detectorType=${detectorType}" }
+        }
+        return@awaitPointerEventScope null
+      }
+
+      initialPointerEvent
+    }
+
+    if (initialPointerEvent == null) {
+      return
     }
 
     if (multiTouchGestureDetector == null) {
@@ -257,20 +299,15 @@ private suspend fun PointerInputScope.detectMultiTouchGestures(
       return
     }
 
-    if (initialPointerEvent.changes.fastAll { it.changedToUpIgnoreConsumed() }) {
-      return
-    }
-
     if (multiTouchGestureDetector.debug) {
-      logcat(tag = TAG) { "Gestures NOT locked, detectorType=${detectorType}" }
+      logcat(tag = TAG) { "multi() Gestures NOT locked, detectorType=${detectorType}" }
     }
 
     val pointersCount = initialPointerEvent.changes.count { it.pressed }
-    if (pointersCount <= 0) {
-      return
-    }
-
     if (pointersCount < 2) {
+      if (multiTouchGestureDetector.debug) {
+        logcat(tag = TAG) { "multi() pointersCount < 2 (pointersCount=$pointersCount), detectorType=${detectorType}" }
+      }
       continue
     }
 
@@ -280,10 +317,16 @@ private suspend fun PointerInputScope.detectMultiTouchGestures(
       .take(2)
 
     if (twoMostRecentEvents.isEmpty()) {
+      if (multiTouchGestureDetector.debug) {
+        logcat(tag = TAG) { "multi() twoMostRecentEvents is empty, detectorType=${detectorType}" }
+      }
       return
     }
 
     if (twoMostRecentEvents.size != 2) {
+      if (multiTouchGestureDetector.debug) {
+        logcat(tag = TAG) { "multi() twoMostRecentEvents.size != 2 (size=${twoMostRecentEvents.size}), detectorType=${detectorType}" }
+      }
       continue
     }
 
@@ -367,15 +410,33 @@ private suspend fun PointerInputScope.detectZoomGestures(
     }
 
     if (zoomGestureDetector.debug) {
-      logcat(tag = TAG) { "Gestures NOT locked, detectorType=${detectorType}" }
+      logcat(tag = TAG) { "zoom() Gestures NOT locked, detectorType=${detectorType}" }
     }
 
     val firstUpOrCancel = waitForUpOrCancellation()
-      ?: return@awaitPointerEventScope
-    val secondDown = awaitSecondDown(firstUpOrCancel)
-      ?: return@awaitPointerEventScope
+    if (firstUpOrCancel == null) {
+      if (zoomGestureDetector.debug) {
+        logcat(tag = TAG) { "zoom() waitForUpOrCancellation() failed, detectorType=${detectorType}" }
+      }
 
-    if ((secondDown.uptimeMillis - firstDown.uptimeMillis).absoluteValue > quickZoomTimeoutMs) {
+      return@awaitPointerEventScope
+    }
+
+    val secondDown = awaitSecondDown(firstUpOrCancel)
+    if (secondDown == null) {
+      if (zoomGestureDetector.debug) {
+        logcat(tag = TAG) { "zoom() awaitSecondDown() failed, detectorType=${detectorType}" }
+      }
+
+      return@awaitPointerEventScope
+    }
+
+    val timeDelta = (secondDown.uptimeMillis - firstDown.uptimeMillis).absoluteValue
+    if (timeDelta > quickZoomTimeoutMs) {
+      if (zoomGestureDetector.debug) {
+        logcat(tag = TAG) { "zoom() timeDelta failed (timeDelta=$timeDelta), detectorType=${detectorType}" }
+      }
+
       // Too much time has passed between the first and the second touch events so we can't use this
       // gesture as quick zoom anymore
       return@awaitPointerEventScope
@@ -461,14 +522,20 @@ private suspend fun AwaitPointerEventScope.awaitFirstDownOnPass(
 
 private suspend fun AwaitPointerEventScope.awaitSecondDown(
   firstUp: PointerInputChange
-): PointerInputChange? = withTimeoutOrNull(viewConfiguration.doubleTapTimeoutMillis) {
-  val minUptime = firstUp.uptimeMillis + viewConfiguration.doubleTapMinTimeMillis
-  var change: PointerInputChange
+): PointerInputChange? {
+  return withTimeoutOrNull(viewConfiguration.doubleTapTimeoutMillis) {
+    val minUptime = firstUp.uptimeMillis + viewConfiguration.doubleTapMinTimeMillis
+    var change: PointerInputChange? = null
 
-  // The second tap doesn't count if it happens before DoubleTapMinTime of the first tap
-  do {
-    change = awaitFirstDown()
-  } while (change.uptimeMillis < minUptime)
+    // The second tap doesn't count if it happens before DoubleTapMinTime of the first tap
+    do {
+      val pointerEvent = awaitPointerEvent(pass = PointerEventPass.Initial)
 
-  return@withTimeoutOrNull change
+      val ourChange = pointerEvent.changes.fastFirstOrNull { it.id != firstUp.id } ?: break
+      change = ourChange
+
+    } while (ourChange.uptimeMillis < minUptime)
+
+    return@withTimeoutOrNull change
+  }
 }
