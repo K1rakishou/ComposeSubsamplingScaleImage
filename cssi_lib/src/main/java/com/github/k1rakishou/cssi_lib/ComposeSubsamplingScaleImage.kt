@@ -209,8 +209,8 @@ fun ComposeSubsamplingScaleImage(
   state: ComposeSubsamplingScaleImageState,
   imageSourceProvider: ImageSourceProvider,
   eventListener: ComposeSubsamplingScaleImageEventListener? = null,
-  FullImageLoadingContent: (@Composable () -> Unit)? = null,
-  FullImageErrorLoadingContent: (@Composable (Throwable) -> Unit)? = null
+  fullImageLoadingContent: (@Composable () -> Unit)? = null,
+  fullImageErrorLoadingContent: (@Composable (Throwable) -> Unit)? = null
 ) {
   if (state.maxTileSize is MaxTileSize.Auto) {
     val detected = detectCanvasMaxBitmapSize(
@@ -265,10 +265,10 @@ fun ComposeSubsamplingScaleImage(
 
     when (val initialization = initializationMut) {
       InitializationState.Uninitialized -> {
-        FullImageLoadingContent?.invoke()
+        fullImageLoadingContent?.invoke()
       }
       is InitializationState.Error -> {
-        FullImageErrorLoadingContent?.invoke(initialization.exception)
+        fullImageErrorLoadingContent?.invoke(initialization.exception)
       }
       is InitializationState.Success -> {
         val invalidate by state.invalidate
