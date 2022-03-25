@@ -55,7 +55,8 @@ class ComposeSubsamplingScaleImageState internal constructor(
   val minDpiDefault: Int?,
   val minTileDpiDefault: Int?,
   val doubleTapZoomDpiDefault: Int?,
-  val scrollableContainerDirection: ScrollableContainerDirection?
+  val scrollableContainerDirection: ScrollableContainerDirection?,
+  private var pendingImageSaveableState: ImageSaveableState?
 ) : RememberObserver {
   private val decoderDispatcher by decoderDispatcherLazy
   private lateinit var coroutineScope: CoroutineScope
@@ -73,13 +74,13 @@ class ComposeSubsamplingScaleImageState internal constructor(
 
   private var satTemp = ScaleAndTranslate()
   private var needInitScreenTranslate = true
-  val vTranslate = PointF()
-  var currentScale = 0f
   private var lastInvalidateTime = 0L
+
+  var vTranslate = PointF()
+  var currentScale = 0f
 
   var debugKey: String? = null
     private set
-
   var sourceImageDimensions: IntSize? = null
     private set
 
@@ -134,6 +135,17 @@ class ComposeSubsamplingScaleImageState internal constructor(
 
   override fun onAbandoned() {
     reset()
+  }
+
+  fun imageSaveableState(): ImageSaveableState? {
+    if (!isReady || sourceImageDimensions == null || viewWidth <= 0 || viewHeight <= 0) {
+      return null
+    }
+
+    return ImageSaveableState(
+      scale = currentScale,
+      center = getCenter()
+    )
   }
 
   fun requestInvalidate(forced: Boolean = false) {
@@ -937,6 +949,27 @@ class ComposeSubsamplingScaleImageState internal constructor(
 
     timeF--
     return -change / 2f * (timeF * (timeF - 2) - 1) + from
+  }
+
+  fun preDraw() {
+    if (!isReady || sourceImageDimensions == null || viewWidth <= 0 || viewHeight <= 0) {
+      return
+    }
+
+    val imageSaveableState = pendingImageSaveableState
+      ?: return
+
+    val pendingScale = imageSaveableState.scale
+    val sPendingCenterX = imageSaveableState.center.x
+    val sPendingCenterY = imageSaveableState.center.y
+
+    currentScale = pendingScale
+    vTranslate.x = (viewWidth / 2) - (currentScale * sPendingCenterX)
+    vTranslate.y = (viewHeight / 2) - (currentScale * sPendingCenterY)
+    pendingImageSaveableState = null
+
+    fitToBounds(true)
+    refreshRequiredTiles(true)
   }
 
   companion object {

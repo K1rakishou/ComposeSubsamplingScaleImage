@@ -11,9 +11,12 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -149,7 +152,11 @@ fun rememberComposeSubsamplingScaleImageState(
     return@remember composeViewConfiguration.doubleTapTimeoutMillis.toInt()
   }
 
-  return remember {
+  var imageSaveableState by rememberSaveable(key = "compose_subsampling_scale_image_saveable_state") {
+    mutableStateOf<ImageSaveableState?>(null)
+  }
+
+  val composeSubsamplingScaleImageState = remember {
     ComposeSubsamplingScaleImageState(
       context = context,
       maxTileSize = maxMaxTileSizeInfoRemembered,
@@ -168,9 +175,20 @@ fun rememberComposeSubsamplingScaleImageState(
       minDpiDefault = minDpi,
       minTileDpiDefault = minTileDpi,
       doubleTapZoomDpiDefault = doubleTapZoomDpiDefault,
-      scrollableContainerDirection = scrollableContainerDirection
+      scrollableContainerDirection = scrollableContainerDirection,
+      pendingImageSaveableState = imageSaveableState
     )
   }
+
+  DisposableEffect(
+    key1 = Unit,
+    effect = {
+      onDispose {
+        imageSaveableState = composeSubsamplingScaleImageState.imageSaveableState()
+      }
+    })
+
+  return composeSubsamplingScaleImageState
 }
 
 @Composable
@@ -324,6 +342,7 @@ private fun DrawScope.DrawTileGrid(
     return
   }
 
+  state.preDraw()
   state.fitToBounds(false)
 
   val nativeCanvas = drawContext.canvas.nativeCanvas
