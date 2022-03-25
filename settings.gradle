@@ -15,5 +15,5 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "ComposeSubsamplingScaleImage"
-include ':sample'
-include ':lib'
+include ':cssi_sample'
+include ':cssi_lib'
