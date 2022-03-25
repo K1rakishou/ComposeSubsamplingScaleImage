@@ -101,11 +101,7 @@ fun rememberComposeSubsamplingScaleImageState(
   quickZoomTimeoutMs: Int? = null,
   zoomAnimationDurationMs: Int = 250,
   flingAnimationDurationMs: Int = 250,
-  minDpi: Int = 160,
-  maxDpi: Int? = null,
-  minTileDpi: Int? = null,
   doubleTapZoom: Float? = null,
-  doubleTapZoomDpi: Int? = 160,
   minScale: Float? = null,
   maxScale: Float? = null,
   scrollableContainerDirection: ScrollableContainerDirection? = null,
@@ -175,10 +171,7 @@ fun rememberComposeSubsamplingScaleImageState(
       animationUpdateIntervalMs = animationUpdateIntervalMs,
       zoomAnimationDurationMs = zoomAnimationDurationMs,
       flingAnimationDurationMs = flingAnimationDurationMs,
-      minDpi = minDpi,
-      maxDpi = maxDpi,
-      minTileDpi = minTileDpi,
-      doubleTapZoomDpi = doubleTapZoomDpi,
+      minDpi = 160,
       scrollableContainerDirection = scrollableContainerDirection,
       pendingImageSaveableState = imageSaveableState
     )

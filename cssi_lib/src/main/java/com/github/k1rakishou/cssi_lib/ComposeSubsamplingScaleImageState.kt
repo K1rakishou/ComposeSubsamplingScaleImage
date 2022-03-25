@@ -7,7 +7,6 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.PointF
 import android.os.SystemClock
-import android.util.DisplayMetrics
 import android.util.Log
 import androidx.compose.runtime.RememberObserver
 import androidx.compose.runtime.State
@@ -54,9 +53,6 @@ class ComposeSubsamplingScaleImageState internal constructor(
   val zoomAnimationDurationMs: Int,
   val flingAnimationDurationMs: Int,
   val minDpi: Int,
-  val maxDpi: Int?,
-  minTileDpi: Int?,
-  val doubleTapZoomDpi: Int?,
   val scrollableContainerDirection: ScrollableContainerDirection?,
   private var pendingImageSaveableState: ImageSaveableState?
 ) : RememberObserver {
@@ -68,10 +64,9 @@ class ComposeSubsamplingScaleImageState internal constructor(
 
   internal val tileMap = LinkedHashMap<Int, MutableList<Tile>>()
 
-  val minTileDpi by lazy { minTileDpi(minTileDpi) }
-  val minScale by lazy { calculateMinScale(maxDpi) }
+  val minScale by lazy { calculateMinScale() }
   val maxScale by lazy { calculateMaxScale(minDpi) }
-  val doubleTapZoomScale by lazy { calculateDoubleTapZoomScale(doubleTapZoom, doubleTapZoomDpi) }
+  val doubleTapZoomScale by lazy { calculateDoubleTapZoomScale(doubleTapZoom) }
 
   private var satTemp = ScaleAndTranslate()
   private var needInitScreenTranslate = true
@@ -181,28 +176,12 @@ class ComposeSubsamplingScaleImageState internal constructor(
     needInitScreenTranslate = true
   }
 
-  private fun calculateDoubleTapZoomScale(doubleTapZoom: Float?, doubleTapZoomDpi: Int?): Float {
+  private fun calculateDoubleTapZoomScale(doubleTapZoom: Float?): Float {
     if (doubleTapZoom != null && doubleTapZoom > 0f) {
       return doubleTapZoom
     }
 
-    if (doubleTapZoomDpi == null || doubleTapZoomDpi <= 0) {
-      return defaultDoubleTapZoom
-    }
-
-    val metrics = getResources().displayMetrics
-    val averageDpi = (metrics.xdpi + metrics.ydpi) / 2
-    return averageDpi / doubleTapZoomDpi.toFloat()
-  }
-
-  private fun minTileDpi(minTileDpi: Int?): Int? {
-    if (minTileDpi == null || minTileDpi <= 0) {
-      return null
-    }
-
-    val metrics = context.resources.displayMetrics
-    val averageDpi = (metrics.xdpi + metrics.ydpi) / 2
-    return Math.min(averageDpi, minTileDpi.toFloat()).toInt()
+    return defaultDoubleTapZoom
   }
 
   suspend fun initialize(
@@ -543,18 +522,8 @@ class ComposeSubsamplingScaleImageState internal constructor(
   }
 
   internal fun calculateInSampleSize(sourceWidth: Int, sourceHeight: Int, scale: Float): Int {
-    var modifiedScale = scale
-
-    minTileDpi
-      ?.takeIf { dpi -> dpi > 0 }
-      ?.let { dpi ->
-        val metrics: DisplayMetrics = getResources().displayMetrics
-        val averageDpi = (metrics.xdpi + metrics.ydpi) / 2
-        modifiedScale *= (dpi / averageDpi)
-      }
-
-    val reqWidth = (sourceWidth * modifiedScale).toInt()
-    val reqHeight = (sourceHeight * modifiedScale).toInt()
+    val reqWidth = (sourceWidth * scale).toInt()
+    val reqHeight = (sourceHeight * scale).toInt()
 
     var inSampleSize = 1
     if (reqWidth == 0 || reqHeight == 0) {
@@ -759,14 +728,7 @@ class ComposeSubsamplingScaleImageState internal constructor(
     return averageDpi / minDpi
   }
 
-  fun calculateMinScale(maxDpi: Int?): Float {
-    if (maxDpi != null && maxDpi > 0) {
-      val metrics = getResources().displayMetrics
-      val averageDpi = (metrics.xdpi + metrics.ydpi) / 2
-
-      return averageDpi / maxDpi
-    }
-
+  fun calculateMinScale(): Float {
     // TODO(KurobaEx): paddings
     val hPadding = 0
     val vPadding = 0
