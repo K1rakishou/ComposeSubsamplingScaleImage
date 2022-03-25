@@ -2,9 +2,7 @@ package com.github.k1rakishou.cssi_lib.gestures
 
 import android.os.SystemClock
 import com.github.k1rakishou.cssi_lib.ComposeSubsamplingScaleImageState
-import com.github.k1rakishou.cssi_lib.helpers.errorMessageOrClassName
 import com.github.k1rakishou.cssi_lib.helpers.logcat
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -14,51 +12,43 @@ import kotlinx.coroutines.launch
 
 class GestureAnimation<Params>(
   val debug: Boolean,
+  val detectorType: DetectorType,
   val state: ComposeSubsamplingScaleImageState,
   val coroutineScope: CoroutineScope,
-  val canBeCanceled: Boolean,
   val durationMs: Int,
   val animationUpdateIntervalMs: Long,
   val animationParams: () -> Params,
-  val animation: suspend (Params, Float, Long) -> Unit,
+  val animationFunc: suspend (Params, Float, Long) -> Unit,
   val onAnimationEnd: (Boolean) -> Unit
 ) {
-  private var animationJob: Job? = null
+  @Volatile private var animationJob: Job? = null
 
   val animating: Boolean
     get() = animationJob != null
 
   fun start() {
     if (debug) {
-      logcat(tag = TAG) { "Animation start()" }
+      logcat(tag = TAG) { "Animation start($detectorType)" }
     }
 
     animationJob?.cancel()
     animationJob = coroutineScope.launch {
       val job = coroutineContext[Job]!!
 
-      job.invokeOnCompletion { cause ->
-        if (debug) {
-          logcat(tag = TAG) { "Animation OnCompletion, cause=${cause?.errorMessageOrClassName()}" }
-        }
-
-        val canceled = cause is CancellationException
-        onAnimationEnd(canceled)
-      }
-
       val startTime = SystemClock.elapsedRealtime()
       val params = animationParams()
       var progress = 0f
+      var endedNormally = false
 
       try {
         while (job.isActive) {
           job.ensureActive()
 
-          if (!state.isReadyForGestures) {
+          if (!state.isReadyForGestures || animationJob == null) {
             break
           }
 
-          animation(params, progress, durationMs.toLong())
+          animationFunc(params, progress, durationMs.toLong())
           delay(animationUpdateIntervalMs)
 
           if (progress >= 1f) {
@@ -72,9 +62,11 @@ class GestureAnimation<Params>(
             progress = 1f
           }
         }
+
+        endedNormally = true
       } finally {
-        if (progress < 1f && state.isReadyForGestures) {
-          animation(params, 1f, durationMs.toLong())
+        if (debug) {
+          logcat(tag = TAG) { "Animation end($detectorType) endedNormally=$endedNormally" }
         }
 
         animationJob = null
@@ -82,19 +74,17 @@ class GestureAnimation<Params>(
     }
   }
 
-  fun cancel(forced: Boolean): Boolean {
+  fun cancel() {
     if (debug) {
-      logcat(tag = TAG) { "Animation cancel() canBeCanceled=$canBeCanceled, forced=$forced" }
+      logcat(tag = TAG) {
+        "Animation cancel($detectorType) jobActive=${animationJob?.isActive == true}"
+      }
     }
 
-    if (canBeCanceled || forced) {
-      animationJob?.cancel()
-      animationJob = null
+    animationJob?.cancel()
+    animationJob = null
 
-      return true
-    }
-
-    return false
+    onAnimationEnd(true)
   }
 
   companion object {

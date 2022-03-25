@@ -98,7 +98,8 @@ class MainActivity : ComponentActivity() {
       modifier = Modifier.fillMaxSize(),
       pointerInputKey = pagerState.currentPage,
       state = rememberComposeSubsamplingScaleImageState(
-        maxScale = 5f,
+        maxScale = 3f,
+        doubleTapZoom = 2f,
         scrollableContainerDirection = ScrollableContainerDirection.Horizontal,
         debug = true
       ),

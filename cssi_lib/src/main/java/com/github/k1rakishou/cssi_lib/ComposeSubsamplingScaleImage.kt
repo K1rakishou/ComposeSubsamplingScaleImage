@@ -231,9 +231,9 @@ fun ComposeSubsamplingScaleImage(
     key1 = Unit,
     effect = {
       onDispose {
-        zoomGestureDetector.cancelAnimation(forced = true)
-        panGestureDetector.cancelAnimation(forced = true)
-        multiTouchGestureDetector.cancelAnimation(forced = true)
+        zoomGestureDetector.cancelAnimation()
+        panGestureDetector.cancelAnimation()
+        multiTouchGestureDetector.cancelAnimation()
       }
     })
 

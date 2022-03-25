@@ -2,6 +2,9 @@ package com.github.k1rakishou.cssi_lib.gestures
 
 import androidx.annotation.CallSuper
 import androidx.compose.ui.input.pointer.PointerInputChange
+import com.github.k1rakishou.cssi_lib.gestures.GestureAction.End
+import com.github.k1rakishou.cssi_lib.gestures.GestureAction.Start
+import com.github.k1rakishou.cssi_lib.gestures.GestureAction.Update
 import com.github.k1rakishou.cssi_lib.helpers.logcat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -14,14 +17,25 @@ abstract class GestureDetector(
   protected var currentGestureAnimation: GestureAnimation<*>? = null
   protected var coroutineScope: CoroutineScope? = null
 
-  val animating: Boolean
-    get() = currentGestureAnimation?.animating ?: false
+  private var prevGestureAction: GestureAction? = null
 
-  fun cancelAnimation(forced: Boolean = false) {
-    val canceled = currentGestureAnimation?.cancel(forced) == true
-    if (canceled) {
-      currentGestureAnimation = null
+  val animating: Boolean
+    get() {
+      if (currentGestureAnimation?.animating == true) {
+        return true
+      }
+
+      return when (prevGestureAction) {
+        Start -> false
+        Update -> true
+        End -> false
+        null -> false
+      }
     }
+
+  fun cancelAnimation() {
+    currentGestureAnimation?.cancel()
+    currentGestureAnimation = null
   }
 
   @CallSuper
@@ -29,6 +43,8 @@ abstract class GestureDetector(
     if (debug) {
       logcat(tag = TAG) { "onGestureStarted() detectorType=${detectorType}" }
     }
+
+    validateGestureStart()
 
     coroutineScope?.cancel()
     coroutineScope = CoroutineScope(Dispatchers.Main)
@@ -39,6 +55,8 @@ abstract class GestureDetector(
     if (debug) {
       logcat(tag = TAG) { "onGestureUpdated() detectorType=${detectorType}" }
     }
+
+    validateGestureUpdate()
   }
 
   @CallSuper
@@ -47,13 +65,42 @@ abstract class GestureDetector(
       logcat(tag = TAG) { "onGestureEnded() canceled=$canceled, detectorType=${detectorType}" }
     }
 
+    validateGestureEnd()
+
     coroutineScope?.cancel()
     coroutineScope = null
+  }
+
+  private fun validateGestureStart() {
+    check(prevGestureAction == null || prevGestureAction == End) {
+      "Unexpected prevGestureAction: $prevGestureAction, expected null or End"
+    }
+    prevGestureAction = Start
+  }
+
+  private fun validateGestureUpdate() {
+    check(prevGestureAction == Start || prevGestureAction == Update) {
+      "Unexpected prevGestureAction: $prevGestureAction, expected Start or Update"
+    }
+    prevGestureAction = Update
+  }
+
+  private fun validateGestureEnd() {
+    check(prevGestureAction == Start || prevGestureAction == Update) {
+      "Unexpected prevGestureAction: $prevGestureAction, expected Start or Update"
+    }
+    prevGestureAction = End
   }
 
   companion object {
     private const val TAG = "GestureDetector"
   }
+}
+
+enum class GestureAction {
+  Start,
+  Update,
+  End
 }
 
 enum class DetectorType(val index: Int) {

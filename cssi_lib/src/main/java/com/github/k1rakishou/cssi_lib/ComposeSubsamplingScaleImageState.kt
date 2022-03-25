@@ -72,7 +72,7 @@ class ComposeSubsamplingScaleImageState internal constructor(
   private var needInitScreenTranslate = true
   private var lastInvalidateTime = 0L
 
-  var vTranslate = PointF()
+  var vTranslate = PointfMut()
   var currentScale = 0f
 
   var debugKey: String? = null
@@ -656,7 +656,7 @@ class ComposeSubsamplingScaleImageState internal constructor(
     check(viewWidth > 0) { "Bad availableWidth" }
     check(viewHeight > 0) { "Bad availableHeight" }
 
-    val vTranslate: PointF = sat.vTranslate
+    val vTranslate = sat.vTranslate
     val scale: Float = limitedScale(sat.scale)
     val scaleWidth: Float = scale * sWidth
     val scaleHeight: Float = scale * sHeight
@@ -862,7 +862,7 @@ class ComposeSubsamplingScaleImageState internal constructor(
     return sTarget
   }
 
-  fun vTranslateForSCenter(sCenterX: Float, sCenterY: Float, scale: Float): PointF {
+  fun vTranslateForSCenter(sCenterX: Float, sCenterY: Float, scale: Float): PointfMut {
     val vxCenter: Int = viewWidth / 2
     val vyCenter: Int = viewHeight / 2
 

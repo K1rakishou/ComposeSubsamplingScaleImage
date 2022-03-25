@@ -10,6 +10,7 @@ import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import com.github.k1rakishou.cssi_lib.ComposeSubsamplingScaleImageState
+import com.github.k1rakishou.cssi_lib.PointfMut
 import com.github.k1rakishou.cssi_lib.ScaleAndTranslate
 
 /**
@@ -57,7 +58,13 @@ class ZoomGestureDetector(
   }
 
   override fun onGestureEnded(canceled: Boolean, pointerInputChanges: List<PointerInputChange>) {
-    if (state.isReadyForGestures && !animatingQuickZoom && !quickScaleMoved && coroutineScope != null) {
+    if (
+      !canceled &&
+      state.isReadyForGestures &&
+      !animatingQuickZoom &&
+      !quickScaleMoved &&
+      coroutineScope != null
+    ) {
       if (currentGestureAnimation != null) {
         return
       }
@@ -240,9 +247,9 @@ class ZoomGestureDetector(
 
     currentGestureAnimation = GestureAnimation<GestureAnimationParameters>(
       debug = debug,
+      detectorType = detectorType,
       state = state,
       coroutineScope = coroutineScope!!,
-      canBeCanceled = false,
       durationMs = state.zoomAnimationDurationMs,
       animationUpdateIntervalMs = state.animationUpdateIntervalMs.toLong(),
       animationParams = {
@@ -279,7 +286,7 @@ class ZoomGestureDetector(
 
           val satEnd = ScaleAndTranslate(
             scale = targetScale,
-            vTranslate = PointF(vTranslateXEnd, vTranslateYEnd)
+            vTranslate = PointfMut(vTranslateXEnd, vTranslateYEnd)
           )
           state.fitToBounds(true, satEnd)
 
@@ -308,7 +315,7 @@ class ZoomGestureDetector(
           sCenterEnd = sCenterEnd
         )
       },
-      animation = { params: GestureAnimationParameters, _: Float, duration: Long ->
+      animationFunc = { params: GestureAnimationParameters, _: Float, duration: Long ->
         val startScale = params.startScale
         val endScale = params.endScale
 

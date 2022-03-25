@@ -100,6 +100,7 @@ class PanGestureDetector(
     }
 
     if (
+      !canceled &&
       state.isReadyForGestures &&
       !animatingFling &&
       isPanning &&
@@ -151,9 +152,9 @@ class PanGestureDetector(
   ) {
     currentGestureAnimation = GestureAnimation<PanAnimationParameters>(
       debug = debug,
+      detectorType = detectorType,
       state = state,
       coroutineScope = coroutineScope!!,
-      canBeCanceled = true,
       durationMs = state.flingAnimationDurationMs,
       animationUpdateIntervalMs = state.animationUpdateIntervalMs.toLong(),
       animationParams = {
@@ -185,7 +186,7 @@ class PanGestureDetector(
           vFocusEnd = vFocusEnd,
         )
       },
-      animation = { params: PanAnimationParameters, _: Float, duration: Long ->
+      animationFunc = { params: PanAnimationParameters, _: Float, duration: Long ->
         val startScale = params.startScale
         val endScale = params.endScale
 

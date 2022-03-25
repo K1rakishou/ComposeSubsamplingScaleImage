@@ -65,7 +65,7 @@ internal suspend fun PointerInputScope.processGestures(
           return@invokeOnCompletion
         }
 
-        allDetectors.fastForEach { detector -> detector.cancelAnimation(forced = true) }
+        allDetectors.fastForEach { detector -> detector.cancelAnimation() }
       }
 
       activeDetectorJobs[DetectorType.Zoom.index] = launch {
@@ -128,8 +128,11 @@ private suspend fun PointerInputScope.detectPanGestures(
     cancelAnimations()
 
     if (gesturesLocked()) {
+      if (panGestureDetector.debug) {
+        logcat(tag = TAG) { "Gestures locked detectorType=${panGestureDetector.detectorType}" }
+      }
+
       consumeChangesUntilAllPointersAreUp(
-        gestureDetector = panGestureDetector,
         pointerInputChange = firstDown,
         coroutineScope = coroutineScope,
         gesturesLocked = gesturesLocked
@@ -282,8 +285,11 @@ private suspend fun PointerInputScope.detectMultiTouchGestures(
       initialPointerEvent.changes.fastForEach { it.consumeAllChanges() }
 
       awaitPointerEventScope {
+        if (multiTouchGestureDetector.debug) {
+          logcat(tag = TAG) { "Gestures locked detectorType=${multiTouchGestureDetector.detectorType}" }
+        }
+
         consumeChangesUntilAllPointersAreUp(
-          gestureDetector = multiTouchGestureDetector,
           pointerInputChange = null,
           coroutineScope = coroutineScope,
           gesturesLocked = gesturesLocked
@@ -392,8 +398,11 @@ private suspend fun PointerInputScope.detectZoomGestures(
     cancelAnimations()
 
     if (gesturesLocked()) {
+      if (zoomGestureDetector.debug) {
+        logcat(tag = TAG) { "Gestures locked detectorType=${zoomGestureDetector.detectorType}" }
+      }
+
       consumeChangesUntilAllPointersAreUp(
-        gestureDetector = zoomGestureDetector,
         pointerInputChange = firstDown,
         coroutineScope = coroutineScope,
         gesturesLocked = gesturesLocked
@@ -475,15 +484,10 @@ private suspend fun PointerInputScope.detectZoomGestures(
 }
 
 private suspend fun AwaitPointerEventScope.consumeChangesUntilAllPointersAreUp(
-  gestureDetector: GestureDetector,
   pointerInputChange: PointerInputChange?,
   coroutineScope: CoroutineScope,
   gesturesLocked: () -> Boolean
 ) {
-  if (gestureDetector.debug) {
-    logcat(tag = TAG) { "Gestures locked detectorType=${gestureDetector.detectorType}" }
-  }
-
   pointerInputChange?.consumeAllChanges()
 
   while (coroutineScope.isActive && gesturesLocked()) {

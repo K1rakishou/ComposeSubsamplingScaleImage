@@ -77,7 +77,7 @@ class MultiTouchGestureDetector(
         vDistStart = vDistEnd
         scaleStart = state.minScale
         vCenterStart.set(vCenterEndX, vCenterEndX)
-        vTranslateStart.set(state.vTranslate)
+        vTranslateStart.set(state.vTranslate.x, state.vTranslate.y)
       } else {
         val vLeftStart = vCenterStart.x - vTranslateStart.x
         val vTopStart = vCenterStart.y - vTranslateStart.y
@@ -93,7 +93,7 @@ class MultiTouchGestureDetector(
         ) {
           state.fitToBounds(true)
           vCenterStart.set(vCenterEndX, vCenterEndY)
-          vTranslateStart.set(state.vTranslate)
+          vTranslateStart.set(state.vTranslate.x, state.vTranslate.y)
           scaleStart = state.currentScale
           vDistStart = vDistEnd
         }
