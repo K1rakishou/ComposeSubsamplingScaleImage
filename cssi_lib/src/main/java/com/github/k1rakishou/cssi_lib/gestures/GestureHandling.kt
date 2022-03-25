@@ -60,6 +60,14 @@ internal suspend fun PointerInputScope.processGestures(
     }
 
     coroutineScope {
+      coroutineContext[Job]!!.invokeOnCompletion { cause ->
+        if (cause == null) {
+          return@invokeOnCompletion
+        }
+
+        allDetectors.fastForEach { detector -> detector.cancelAnimation(forced = true) }
+      }
+
       activeDetectorJobs[DetectorType.Zoom.index] = launch {
         detectZoomGestures(
           quickZoomTimeoutMs = quickZoomTimeoutMs,

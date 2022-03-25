@@ -11,9 +11,6 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import com.github.k1rakishou.cssi_lib.ComposeSubsamplingScaleImageState
 import com.github.k1rakishou.cssi_lib.ScaleAndTranslate
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.cancel
 
 /**
  * One finger quick scale gesture or double-tap zoom gesture
@@ -41,13 +38,8 @@ class ZoomGestureDetector(
   private var quickScaleLastDistance = 0f
   private var animatingQuickZoom = false
 
-  private var coroutineScope: CoroutineScope? = null
-
   override fun onGestureStarted(pointerInputChanges: List<PointerInputChange>) {
     super.onGestureStarted(pointerInputChanges)
-
-    coroutineScope?.cancel()
-    coroutineScope = CoroutineScope(Dispatchers.Main)
 
     val pointerInputChange = pointerInputChanges.first()
     val offset = pointerInputChange.position
@@ -65,7 +57,7 @@ class ZoomGestureDetector(
   }
 
   override fun onGestureEnded(canceled: Boolean, pointerInputChanges: List<PointerInputChange>) {
-    if (!animatingQuickZoom && !quickScaleMoved && coroutineScope != null) {
+    if (state.isReadyForGestures && !animatingQuickZoom && !quickScaleMoved && coroutineScope != null) {
       if (currentGestureAnimation != null) {
         return
       }
@@ -94,15 +86,19 @@ class ZoomGestureDetector(
     quickScaleMoved = false
     quickScaleLastDistance = 0f
     currentGestureAnimation = null
-    state.refreshRequiredTiles(load = true)
-    state.requestInvalidate()
 
-    coroutineScope?.cancel()
-    coroutineScope = null
+    if (state.isReadyForGestures) {
+      state.refreshRequiredTiles(load = true)
+      state.requestInvalidate()
+    }
   }
 
   override fun onGestureUpdated(pointerInputChanges: List<PointerInputChange>) {
     super.onGestureUpdated(pointerInputChanges)
+
+    if (!state.isReadyForGestures) {
+      return
+    }
 
     val pointerInputChange = pointerInputChanges.first()
     val offset = pointerInputChange.position
@@ -244,6 +240,7 @@ class ZoomGestureDetector(
 
     currentGestureAnimation = GestureAnimation<GestureAnimationParameters>(
       debug = debug,
+      state = state,
       coroutineScope = coroutineScope!!,
       canBeCanceled = false,
       durationMs = state.zoomAnimationDurationMs,

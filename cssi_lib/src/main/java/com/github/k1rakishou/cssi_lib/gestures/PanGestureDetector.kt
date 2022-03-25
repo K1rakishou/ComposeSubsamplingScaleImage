@@ -9,9 +9,6 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.util.fastForEach
 import com.github.k1rakishou.cssi_lib.ComposeSubsamplingScaleImageState
 import kotlin.math.absoluteValue
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.cancel
 
 /**
  * One finger pan gesture
@@ -27,7 +24,6 @@ class PanGestureDetector(
 
   private val startOffset = PointF(0f, 0f)
 
-  private var coroutineScope: CoroutineScope? = null
   private var isPanning = false
   private var animatingFling = false
 
@@ -35,8 +31,6 @@ class PanGestureDetector(
     super.onGestureStarted(pointerInputChanges)
 
     val pointerInputChange = pointerInputChanges.first()
-    coroutineScope?.cancel()
-    coroutineScope = CoroutineScope(Dispatchers.Main)
 
     isPanning = false
     animatingFling = false
@@ -57,6 +51,10 @@ class PanGestureDetector(
 
   override fun onGestureUpdated(pointerInputChanges: List<PointerInputChange>) {
     super.onGestureUpdated(pointerInputChanges)
+
+    if (!state.isReadyForGestures) {
+      return
+    }
 
     val pointerInputChange = pointerInputChanges.first()
     val offset = pointerInputChange.position
@@ -102,6 +100,7 @@ class PanGestureDetector(
     }
 
     if (
+      state.isReadyForGestures &&
       !animatingFling &&
       isPanning &&
       coroutineScope != null &&
@@ -137,11 +136,11 @@ class PanGestureDetector(
     isPanning = false
     animatingFling = false
     velocityTracker.resetTracking()
-    state.refreshRequiredTiles(load = true)
-    state.requestInvalidate()
 
-    coroutineScope?.cancel()
-    coroutineScope = null
+    if (state.isReadyForGestures) {
+      state.refreshRequiredTiles(load = true)
+      state.requestInvalidate()
+    }
   }
 
   private fun initAndStartFlingAnimation(
@@ -152,6 +151,7 @@ class PanGestureDetector(
   ) {
     currentGestureAnimation = GestureAnimation<PanAnimationParameters>(
       debug = debug,
+      state = state,
       coroutineScope = coroutineScope!!,
       canBeCanceled = true,
       durationMs = state.flingAnimationDurationMs,

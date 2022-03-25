@@ -230,6 +230,16 @@ fun ComposeSubsamplingScaleImage(
   val panGestureDetector = remember { PanGestureDetector(density, state) }
   val multiTouchGestureDetector = remember { MultiTouchGestureDetector(density, state) }
 
+  DisposableEffect(
+    key1 = Unit,
+    effect = {
+      onDispose {
+        zoomGestureDetector.cancelAnimation(forced = true)
+        panGestureDetector.cancelAnimation(forced = true)
+        multiTouchGestureDetector.cancelAnimation(forced = true)
+      }
+    })
+
   BoxWithConstraints(
     modifier = Modifier
       .fillMaxSize()

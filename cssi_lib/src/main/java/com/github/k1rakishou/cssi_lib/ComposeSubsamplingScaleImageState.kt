@@ -124,6 +124,8 @@ class ComposeSubsamplingScaleImageState internal constructor(
 
   val isReady: Boolean
     get() = initializationState.value is InitializationState.Success
+  val isReadyForGestures: Boolean
+    get() = isReady && viewWidth > 0 && viewHeight > 0 && sourceImageDimensions != null
 
   override fun onRemembered() {
     coroutineScope = CoroutineScope(decoderDispatcher)
@@ -158,9 +160,11 @@ class ComposeSubsamplingScaleImageState internal constructor(
   }
 
   private fun reset() {
+    initializationState.value = InitializationState.Uninitialized
+    coroutineScope.cancel()
+
     tileMap.entries.forEach { (_, tiles) -> tiles.forEach { tile -> tile.recycle() } }
     tileMap.clear()
-    coroutineScope.cancel()
 
     debugKey = null
     vTranslate.set(0f, 0f)
@@ -174,7 +178,6 @@ class ComposeSubsamplingScaleImageState internal constructor(
     dstArray.fill(0f)
     subsamplingImageDecoder.getAndSet(null)?.recycle()
     needInitScreenTranslate = true
-    initializationState.value = InitializationState.Uninitialized
   }
 
   private fun calculateDoubleTapZoomScale(dpi: Int?): Float {

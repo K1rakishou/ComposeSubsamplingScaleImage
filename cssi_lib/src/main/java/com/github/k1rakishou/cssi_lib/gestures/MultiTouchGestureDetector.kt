@@ -47,6 +47,10 @@ class MultiTouchGestureDetector(
   override fun onGestureUpdated(pointerInputChanges: List<PointerInputChange>) {
     super.onGestureUpdated(pointerInputChanges)
 
+    if (!state.isReadyForGestures) {
+      return
+    }
+
     val firstPointerChange = pointerInputChanges[0]
     val secondPointerChange = pointerInputChanges[1]
 
@@ -111,7 +115,9 @@ class MultiTouchGestureDetector(
     vCenterStart.set(0f, 0f)
     vTranslateStart.set(state.vTranslate.x, state.vTranslate.y)
 
-    state.refreshRequiredTiles(load = true)
-    state.requestInvalidate()
+    if (state.isReadyForGestures) {
+      state.refreshRequiredTiles(load = true)
+      state.requestInvalidate()
+    }
   }
 }

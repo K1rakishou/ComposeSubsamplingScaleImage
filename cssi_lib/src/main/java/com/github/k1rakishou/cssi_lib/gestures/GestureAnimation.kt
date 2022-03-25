@@ -1,6 +1,7 @@
 package com.github.k1rakishou.cssi_lib.gestures
 
 import android.os.SystemClock
+import com.github.k1rakishou.cssi_lib.ComposeSubsamplingScaleImageState
 import com.github.k1rakishou.cssi_lib.helpers.errorMessageOrClassName
 import com.github.k1rakishou.cssi_lib.helpers.logcat
 import kotlinx.coroutines.CancellationException
@@ -13,6 +14,7 @@ import kotlinx.coroutines.launch
 
 class GestureAnimation<Params>(
   val debug: Boolean,
+  val state: ComposeSubsamplingScaleImageState,
   val coroutineScope: CoroutineScope,
   val canBeCanceled: Boolean,
   val durationMs: Int,
@@ -52,6 +54,10 @@ class GestureAnimation<Params>(
         while (job.isActive) {
           job.ensureActive()
 
+          if (!state.isReadyForGestures) {
+            break
+          }
+
           animation(params, progress, durationMs.toLong())
           delay(animationUpdateIntervalMs)
 
@@ -67,7 +73,7 @@ class GestureAnimation<Params>(
           }
         }
       } finally {
-        if (progress < 1f) {
+        if (progress < 1f && state.isReadyForGestures) {
           animation(params, 1f, durationMs.toLong())
         }
 
@@ -76,12 +82,12 @@ class GestureAnimation<Params>(
     }
   }
 
-  fun cancel(): Boolean {
+  fun cancel(forced: Boolean): Boolean {
     if (debug) {
-      logcat(tag = TAG) { "Animation cancel() canBeCanceled=$canBeCanceled" }
+      logcat(tag = TAG) { "Animation cancel() canBeCanceled=$canBeCanceled, forced=$forced" }
     }
 
-    if (canBeCanceled) {
+    if (canBeCanceled || forced) {
       animationJob?.cancel()
       animationJob = null
 
