@@ -43,6 +43,7 @@ class ComposeSubsamplingScaleImageState internal constructor(
   val minimumScaleType: MinimumScaleType,
   val minScaleParam: Float?,
   val maxScaleParam: Float?,
+  val doubleTapZoom: Float?,
   val imageDecoderProvider: ImageDecoderProvider,
   val decoderDispatcherLazy: Lazy<CoroutineDispatcher>,
   val debug: Boolean,
@@ -52,9 +53,10 @@ class ComposeSubsamplingScaleImageState internal constructor(
   val animationUpdateIntervalMs: Int,
   val zoomAnimationDurationMs: Int,
   val flingAnimationDurationMs: Int,
-  val minDpiDefault: Int?,
-  val minTileDpiDefault: Int?,
-  val doubleTapZoomDpiDefault: Int?,
+  val minDpi: Int,
+  val maxDpi: Int?,
+  minTileDpi: Int?,
+  val doubleTapZoomDpi: Int?,
   val scrollableContainerDirection: ScrollableContainerDirection?,
   private var pendingImageSaveableState: ImageSaveableState?
 ) : RememberObserver {
@@ -65,12 +67,11 @@ class ComposeSubsamplingScaleImageState internal constructor(
   private val defaultDoubleTapZoom = 1f
 
   internal val tileMap = LinkedHashMap<Int, MutableList<Tile>>()
-  private val minDpi by lazy { minDpi(minDpiDefault) }
-  private val minTileDpi by lazy { minTileDpi(minTileDpiDefault) }
 
-  val minScale by lazy { calculateMinScale() }
+  val minTileDpi by lazy { minTileDpi(minTileDpi) }
+  val minScale by lazy { calculateMinScale(maxDpi) }
   val maxScale by lazy { calculateMaxScale(minDpi) }
-  val doubleTapZoomScale by lazy { calculateDoubleTapZoomScale(doubleTapZoomDpiDefault) }
+  val doubleTapZoomScale by lazy { calculateDoubleTapZoomScale(doubleTapZoom, doubleTapZoomDpi) }
 
   private var satTemp = ScaleAndTranslate()
   private var needInitScreenTranslate = true
@@ -180,24 +181,18 @@ class ComposeSubsamplingScaleImageState internal constructor(
     needInitScreenTranslate = true
   }
 
-  private fun calculateDoubleTapZoomScale(dpi: Int?): Float {
-    if (dpi == null || dpi <= 0) {
+  private fun calculateDoubleTapZoomScale(doubleTapZoom: Float?, doubleTapZoomDpi: Int?): Float {
+    if (doubleTapZoom != null && doubleTapZoom > 0f) {
+      return doubleTapZoom
+    }
+
+    if (doubleTapZoomDpi == null || doubleTapZoomDpi <= 0) {
       return defaultDoubleTapZoom
     }
 
     val metrics = getResources().displayMetrics
     val averageDpi = (metrics.xdpi + metrics.ydpi) / 2
-    return averageDpi / dpi.toFloat()
-  }
-
-  private fun minDpi(minDpi: Int?): Int? {
-    if (minDpi == null || minDpi <= 0) {
-      return null
-    }
-
-    val metrics = getResources().displayMetrics
-    val averageDpi = (metrics.xdpi + metrics.ydpi) / 2
-    return (averageDpi / minDpi.toFloat()).toInt()
+    return averageDpi / doubleTapZoomDpi.toFloat()
   }
 
   private fun minTileDpi(minTileDpi: Int?): Int? {
@@ -750,21 +745,28 @@ class ComposeSubsamplingScaleImageState internal constructor(
     return resultScale
   }
 
-  private fun calculateMaxScale(dpi: Int?): Float {
+  private fun calculateMaxScale(minDpi: Int): Float {
     if (maxScaleParam != null) {
       return maxScaleParam
     }
 
-    if (dpi == null || dpi <= 0) {
+    if (minDpi <= 0) {
       return defaultMaxScale
     }
 
     val metrics = getResources().displayMetrics
     val averageDpi = (metrics.xdpi + metrics.ydpi) / 2
-    return averageDpi / dpi
+    return averageDpi / minDpi
   }
 
-  fun calculateMinScale(): Float {
+  fun calculateMinScale(maxDpi: Int?): Float {
+    if (maxDpi != null && maxDpi > 0) {
+      val metrics = getResources().displayMetrics
+      val averageDpi = (metrics.xdpi + metrics.ydpi) / 2
+
+      return averageDpi / maxDpi
+    }
+
     // TODO(KurobaEx): paddings
     val hPadding = 0
     val vPadding = 0
