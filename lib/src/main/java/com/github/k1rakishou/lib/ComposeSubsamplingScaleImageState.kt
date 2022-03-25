@@ -77,7 +77,9 @@ class ComposeSubsamplingScaleImageState internal constructor(
   var currentScale = 0f
   private var lastInvalidateTime = 0L
 
-  private var debugKey: String? = null
+  var debugKey: String? = null
+    private set
+
   var sourceImageDimensions: IntSize? = null
     private set
 

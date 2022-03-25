@@ -82,7 +82,6 @@ private val tileDebugColors by lazy {
  * some other big number because Canvas has internal limitations on the bitmap size.
  * See https://developer.android.com/reference/android/graphics/Canvas#getMaximumBitmapHeight() and
  * https://developer.android.com/reference/android/graphics/Canvas#getMaximumBitmapWidth()
- * [debug] enables/disables internal logging
  * [decoderDispatcherLazy] the coroutine dispatcher that will be used to decode images.
  * [imageDecoderProvider] the bitmap decoder that does the job
  * [scrollableContainerDirection] If you put inside of a scrollable container you need to specify this
@@ -90,6 +89,7 @@ private val tileDebugColors by lazy {
  * then it's Horizontal, if it's VerticalPager/LazyColumn then it's vertical, if it's not inside of
  * any scrollable container then null) so that ComposeSubsamplingScaleImage can allow that container
  * to scroll when it's completely zoomed out or touching certain side(s) of the container.
+ * [debug] enables/disables internal logging
  * */
 @Composable
 fun rememberComposeSubsamplingScaleImageState(
@@ -101,11 +101,11 @@ fun rememberComposeSubsamplingScaleImageState(
   minDpi: Int? = 160,
   minTileDpi: Int? = null,
   doubleTapZoomDpiDefault: Int? = 160,
-  maxMaxTileSize: () -> MaxTileSize = { MaxTileSize.Auto() },
-  minimumScaleType: () -> MinimumScaleType = { MinimumScaleType.ScaleTypeCenterInside },
-  scrollableContainerDirection: ScrollableContainerDirection? = null,
   minScale: Float? = null,
   maxScale: Float? = null,
+  scrollableContainerDirection: ScrollableContainerDirection? = null,
+  maxMaxTileSize: () -> MaxTileSize = { MaxTileSize.Auto() },
+  minimumScaleType: () -> MinimumScaleType = { MinimumScaleType.ScaleTypeCenterInside },
   decoderDispatcherLazy: Lazy<CoroutineDispatcher> = defaultDecoderDispatcher,
   imageDecoderProvider: ImageDecoderProvider = remember { defaultDecoderProvider },
   debug: Boolean = false
@@ -176,6 +176,18 @@ fun rememberComposeSubsamplingScaleImageState(
 @Composable
 fun ComposeSubsamplingScaleImage(
   modifier: Modifier = Modifier,
+  /**
+   * Hack! When ComposeSubsamplingScaleImage is inside of a LazyColumn/Pager you need to provide
+   * A. LazyListState.firstVisibleItemIndex() if it's inside of a LazyColumn/LazyRow
+   * B. PagerState.currentPage() if it's inside of a HorizontalPager/VerticalPager.
+   * This is needed because otherwise multi-touch gesture detector (which detects 2 finger zoom or
+   * 2 finger pan) won't be restarted for the new page/item so the next 2 finger gesture will be
+   * consumed without being processed. There is probably a better solution for this problem than
+   * this but I couldn't figure it out.
+   * If ComposeSubsamplingScaleImage is not inside of either of them then just pass Unit.
+   * See DisplayFullImage() of MainActivity from the sample project.
+   * */
+  pointerInputKey: Any = Unit,
   state: ComposeSubsamplingScaleImageState,
   imageSourceProvider: ImageSourceProvider,
   eventListener: ComposeSubsamplingScaleImageEventListener? = null,
@@ -204,7 +216,7 @@ fun ComposeSubsamplingScaleImage(
     modifier = Modifier
       .fillMaxSize()
       .pointerInput(
-        key1 = Unit,
+        key1 = pointerInputKey,
         block = {
           processGestures(
             state = state,

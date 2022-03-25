@@ -43,8 +43,6 @@ internal suspend fun PointerInputScope.processGestures(
   val allDetectors = arrayOf(zoomGestureDetector, panGestureDetector).filterNotNull()
 
   fun stopOtherDetectors(excludeDetectorType: DetectorType) {
-    logcat(tag = TAG) { "stopOtherDetectors(excludeDetectorType=$excludeDetectorType)" }
-
     for (index in activeDetectorJobs.indices) {
       if (index == excludeDetectorType.index) {
         continue
@@ -249,36 +247,24 @@ private suspend fun PointerInputScope.detectMultiTouchGestures(
   gesturesLocked: () -> Boolean
 ) {
   while (coroutineScope.isActive) {
-    val initialPointerEvent = awaitPointerEventScope {
-      val initialPointerEvent = awaitPointerEvent(pass = PointerEventPass.Initial)
+    val initialPointerEvent = awaitPointerEventScope { awaitPointerEvent(pass = PointerEventPass.Initial) }
 
-      if (multiTouchGestureDetector == null) {
-        return@awaitPointerEventScope null
-      }
-
-      if (initialPointerEvent.changes.fastAll { it.changedToUpIgnoreConsumed() }) {
-        if (multiTouchGestureDetector.debug) {
-          logcat(tag = TAG) { "multi() initialPointerEvent.changes are all up, detectorType=${detectorType}" }
-        }
-        return@awaitPointerEventScope null
-      }
-
-      val pointersCount = initialPointerEvent.changes.count { it.pressed }
-      if (pointersCount <= 0) {
-        if (multiTouchGestureDetector.debug) {
-          logcat(tag = TAG) { "multi() pointersCount <= 0 (pointersCount=$pointersCount), detectorType=${detectorType}" }
-        }
-        return@awaitPointerEventScope null
-      }
-
-      initialPointerEvent
-    }
-
-    if (initialPointerEvent == null) {
+    if (multiTouchGestureDetector == null) {
       return
     }
 
-    if (multiTouchGestureDetector == null) {
+    if (initialPointerEvent.changes.fastAll { it.changedToUpIgnoreConsumed() }) {
+      if (multiTouchGestureDetector.debug) {
+        logcat(tag = TAG) { "multi() initialPointerEvent.changes are all up, detectorType=${detectorType}" }
+      }
+      return
+    }
+
+    val pointersCount = initialPointerEvent.changes.count { it.pressed }
+    if (pointersCount <= 0) {
+      if (multiTouchGestureDetector.debug) {
+        logcat(tag = TAG) { "multi() pointersCount <= 0 (pointersCount=$pointersCount), detectorType=${detectorType}" }
+      }
       return
     }
 
@@ -303,7 +289,6 @@ private suspend fun PointerInputScope.detectMultiTouchGestures(
       logcat(tag = TAG) { "multi() Gestures NOT locked, detectorType=${detectorType}" }
     }
 
-    val pointersCount = initialPointerEvent.changes.count { it.pressed }
     if (pointersCount < 2) {
       if (multiTouchGestureDetector.debug) {
         logcat(tag = TAG) { "multi() pointersCount < 2 (pointersCount=$pointersCount), detectorType=${detectorType}" }
@@ -533,7 +518,6 @@ private suspend fun AwaitPointerEventScope.awaitSecondDown(
 
       val ourChange = pointerEvent.changes.fastFirstOrNull { it.id != firstUp.id } ?: break
       change = ourChange
-
     } while (ourChange.uptimeMillis < minUptime)
 
     return@withTimeoutOrNull change
