@@ -12,7 +12,8 @@ sealed class MaxTileSize(
   val height: Int
     get() = maxTileSizeState.value!!.height
 
-  // May crash if the canvas doesn't support one of the sizes (width/height)
+  // May crash if the canvas doesn't support one of the sizes (width/height), in other words it's
+  // device-specific. Prefer using MaxTileSize.Auto()
   class Fixed(
     size: IntSize
   ) : MaxTileSize(mutableStateOf(size))
