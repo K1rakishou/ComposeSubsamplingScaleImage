@@ -4,10 +4,6 @@ import android.graphics.PointF
 
 class PointfMut {
   var x: Float = 0f
-    set(value) {
-      field = value
-    }
-
   var y: Float = 0f
 
   constructor() {

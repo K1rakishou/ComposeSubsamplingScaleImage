@@ -93,7 +93,7 @@ class GestureAnimation<Params>(
 
 }
 
-enum class GestureAnimationEasing {
+internal enum class GestureAnimationEasing {
   EaseOutQuad,
   EaseInOutQuad
 }

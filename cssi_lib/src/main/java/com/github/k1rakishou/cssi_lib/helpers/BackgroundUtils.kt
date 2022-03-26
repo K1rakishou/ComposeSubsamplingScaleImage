@@ -4,10 +4,10 @@ import android.os.Looper
 
 internal object BackgroundUtils {
 
-  val isMainThread: Boolean
+  internal val isMainThread: Boolean
     get() = Thread.currentThread() === Looper.getMainLooper().thread
 
-  fun ensureMainThread() {
+  internal fun ensureMainThread() {
     if (isMainThread) {
       return
     }
@@ -15,7 +15,7 @@ internal object BackgroundUtils {
     error("Cannot be executed on a background thread!")
   }
 
-  fun ensureBackgroundThread() {
+  internal fun ensureBackgroundThread() {
     if (!isMainThread) {
       return
     }

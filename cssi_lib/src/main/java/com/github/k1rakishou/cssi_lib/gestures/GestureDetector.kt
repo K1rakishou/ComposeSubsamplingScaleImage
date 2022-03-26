@@ -97,7 +97,7 @@ abstract class GestureDetector(
   }
 }
 
-enum class GestureAction {
+internal enum class GestureAction {
   Start,
   Update,
   End

@@ -44,8 +44,8 @@ class PanGestureDetector(
     startOffset.set(offset.x, offset.y)
     vCenterStart.set(offset.x, offset.y)
     vTranslateStart.set(
-      state.vTranslate.x,
-      state.vTranslate.y
+      state._vTranslate.x,
+      state._vTranslate.y
     )
   }
 
@@ -67,19 +67,19 @@ class PanGestureDetector(
     }
 
     if (dx > minOffset || dy > minOffset || isPanning) {
-      state.vTranslate.set(
+      state._vTranslate.set(
         (vTranslateStart.x + (offset.x - vCenterStart.x)),
         (vTranslateStart.y + (offset.y - vCenterStart.y))
       )
 
-      val lastX: Float = state.vTranslate.x
-      val lastY: Float = state.vTranslate.y
+      val lastX: Float = state._vTranslate.x
+      val lastY: Float = state._vTranslate.y
       state.fitToBounds(true)
-      val atXEdge = lastX != state.vTranslate.x
-      val atYEdge = lastY != state.vTranslate.y
+      val atXEdge = lastX != state._vTranslate.x
+      val atYEdge = lastY != state._vTranslate.y
       val edgeXSwipe = atXEdge && dx > dy && !isPanning
       val edgeYSwipe = atYEdge && dy > dx && !isPanning
-      val yPan = lastY == state.vTranslate.y && dy > minOffset * 3
+      val yPan = lastY == state._vTranslate.y && dy > minOffset * 3
 
       if (!edgeXSwipe && !edgeYSwipe && (!atXEdge || !atYEdge || yPan || isPanning)) {
         isPanning = true
@@ -161,8 +161,8 @@ class PanGestureDetector(
         val currentScale = state.currentScale
 
         val vTranslateEnd = PointF(
-          state.vTranslate.x + (velocityX * 0.25f),
-          state.vTranslate.y + (velocityY * 0.25f)
+          state._vTranslate.x + (velocityX * 0.25f),
+          state._vTranslate.y + (velocityY * 0.25f)
         )
         val sCenterXEnd: Float = (state.viewWidth / 2 - vTranslateEnd.x) / currentScale
         val sCenterYEnd: Float = (state.viewHeight / 2 - vTranslateEnd.y) / currentScale
@@ -209,8 +209,8 @@ class PanGestureDetector(
           duration = duration
         )
 
-        state.vTranslate.x -= (state.sourceToViewX(params.sCenterEnd.x) - vFocusNowX).toInt()
-        state.vTranslate.y -= (state.sourceToViewY(params.sCenterEnd.y) - vFocusNowY).toInt()
+        state._vTranslate.x -= (state.sourceToViewX(params.sCenterEnd.x) - vFocusNowX).toInt()
+        state._vTranslate.y -= (state.sourceToViewY(params.sCenterEnd.y) - vFocusNowY).toInt()
 
         state.fitToBounds(finished || startScale == endScale)
         state.refreshRequiredTiles(finished)

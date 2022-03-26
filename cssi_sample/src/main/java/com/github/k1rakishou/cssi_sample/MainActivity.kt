@@ -1,6 +1,7 @@
 package com.github.k1rakishou.cssi_sample
 
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -15,8 +16,6 @@ import com.github.k1rakishou.cssi_lib.ComposeSubsamplingScaleImageEventListener
 import com.github.k1rakishou.cssi_lib.ComposeSubsamplingScaleImageSource
 import com.github.k1rakishou.cssi_lib.ImageSourceProvider
 import com.github.k1rakishou.cssi_lib.ScrollableContainerDirection
-import com.github.k1rakishou.cssi_lib.helpers.logcat
-import com.github.k1rakishou.cssi_lib.helpers.logcatError
 import com.github.k1rakishou.cssi_lib.rememberComposeSubsamplingScaleImageState
 import com.google.accompanist.pager.ExperimentalPagerApi
 import com.google.accompanist.pager.HorizontalPager
@@ -65,15 +64,15 @@ class MainActivity : ComponentActivity() {
     val eventListener = remember {
       object : ComposeSubsamplingScaleImageEventListener() {
         override fun onImageInfoDecoded(fullImageSize: IntSize) {
-          logcat(tag = "DisplayFullImage") { "onImageInfoDecoded() fullImageSize=$fullImageSize" }
+          Log.d("DisplayFullImage", "onImageInfoDecoded() fullImageSize=$fullImageSize")
         }
 
         override fun onFailedToDecodeImageInfo(error: Throwable) {
-          logcat(tag = "DisplayFullImage") { "onFailedToDecodeImageInfo() error=${error.asLog()}" }
+          Log.d("DisplayFullImage", "onFailedToDecodeImageInfo() error=${error.asLog()}")
         }
 
         override fun onTileDecoded(tileIndex: Int, totalTilesInTopLayer: Int) {
-          logcat(tag = "DisplayFullImage") { "onTileDecoded() ${tileIndex}/${totalTilesInTopLayer}" }
+          Log.d("DisplayFullImage", "onTileDecoded() ${tileIndex}/${totalTilesInTopLayer}")
         }
 
         override fun onFailedToDecodeTile(
@@ -81,33 +80,34 @@ class MainActivity : ComponentActivity() {
           totalTilesInTopLayer: Int,
           error: Throwable
         ) {
-          logcat(tag = "DisplayFullImage") { "onTileDecoded() ${tileIndex}/${totalTilesInTopLayer}, error=${error.asLog()}" }
+          Log.d("DisplayFullImage", "onTileDecoded() ${tileIndex}/${totalTilesInTopLayer}, error=${error.asLog()}")
         }
 
         override fun onFullImageLoaded() {
-          logcat(tag = "DisplayFullImage") { "onFullImageLoaded()" }
+          Log.d("DisplayFullImage", "onFullImageLoaded()")
         }
 
         override fun onFailedToLoadFullImage(error: Throwable) {
-          logcatError(tag = "DisplayFullImage") { "onFailedToLoadFullImage() error=${error.asLog()}" }
+          Log.e("DisplayFullImage", "onFailedToLoadFullImage() error=${error.asLog()}")
         }
       }
     }
 
+    val state = rememberComposeSubsamplingScaleImageState(
+      maxScale = 3f,
+      doubleTapZoom = 2f,
+      scrollableContainerDirection = ScrollableContainerDirection.Horizontal,
+      debug = true
+    )
+
     ComposeSubsamplingScaleImage(
       modifier = Modifier.fillMaxSize(),
       pointerInputKey = pagerState.currentPage,
-      state = rememberComposeSubsamplingScaleImageState(
-        maxScale = 3f,
-        doubleTapZoom = 2f,
-        scrollableContainerDirection = ScrollableContainerDirection.Horizontal,
-        debug = true
-      ),
+      state = state,
       imageSourceProvider = imageSourceProvider,
       eventListener = eventListener
     )
   }
-
 }
 
 private fun Throwable.asLog(): String {

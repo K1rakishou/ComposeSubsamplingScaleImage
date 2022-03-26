@@ -45,8 +45,8 @@ class ZoomGestureDetector(
     val pointerInputChange = pointerInputChanges.first()
     val offset = pointerInputChange.position
     val currentScale = state.currentScale
-    val screenTranslateX = state.vTranslate.x
-    val screenTranslateY = state.vTranslate.y
+    val screenTranslateX = state._vTranslate.x
+    val screenTranslateY = state._vTranslate.y
 
     vCenterStart.set(offset.x, offset.y)
     vTranslateStart.set(screenTranslateX, screenTranslateY)
@@ -139,7 +139,7 @@ class ZoomGestureDetector(
       val vLeftNow: Float = vLeftStart * (newScale / scaleStart)
       val vTopNow: Float = vTopStart * (newScale / scaleStart)
 
-      state.vTranslate.set((vCenterStart.x - vLeftNow), (vCenterStart.y - vTopNow))
+      state._vTranslate.set((vCenterStart.x - vLeftNow), (vCenterStart.y - vTopNow))
 
       if (
         (previousScale * state.sHeight < state.viewHeight && newScale * state.sHeight >= state.viewHeight) ||
@@ -148,7 +148,7 @@ class ZoomGestureDetector(
         state.fitToBounds(true)
         vCenterStart.set(state.sourceToViewCoord(quickScaleSCenter))
 
-        vTranslateStart.set(state.vTranslate.x, state.vTranslate.y)
+        vTranslateStart.set(state._vTranslate.x, state._vTranslate.y)
         scaleStart = newScale
         dist = 0f
       }
@@ -233,8 +233,8 @@ class ZoomGestureDetector(
   private fun initAndStartQuickZoomAnimation(debug: Boolean, pointerInputChanges: List<PointerInputChange>) {
     val pointerInputChange = pointerInputChanges.first()
     val offset = pointerInputChange.position
-    val vTranslateX = state.vTranslate.x
-    val vTranslateY = state.vTranslate.y
+    val vTranslateX = state._vTranslate.x
+    val vTranslateY = state._vTranslate.y
 
     vCenterStart.set(offset.x, offset.y)
     vTranslateStart.set(vTranslateX, vTranslateY)
@@ -347,8 +347,8 @@ class ZoomGestureDetector(
           duration = duration
         )
 
-        state.vTranslate.x -= (state.sourceToViewX(params.sCenterEnd.x) - vFocusNowX).toInt()
-        state.vTranslate.y -= (state.sourceToViewY(params.sCenterEnd.y) - vFocusNowY).toInt()
+        state._vTranslate.x -= (state.sourceToViewX(params.sCenterEnd.x) - vFocusNowX).toInt()
+        state._vTranslate.y -= (state.sourceToViewY(params.sCenterEnd.y) - vFocusNowY).toInt()
 
         state.fitToBounds(finished || startScale == endScale)
         state.refreshRequiredTiles(finished)
@@ -367,7 +367,7 @@ class ZoomGestureDetector(
     currentGestureAnimation!!.start()
   }
 
-  data class GestureAnimationParameters(
+  private data class GestureAnimationParameters(
     val gestureAnimationEasing: GestureAnimationEasing,
     val startTime: Long,
     val startScale: Float,
@@ -378,6 +378,5 @@ class ZoomGestureDetector(
 
     val sCenterEnd: PointF
   )
-
 
 }

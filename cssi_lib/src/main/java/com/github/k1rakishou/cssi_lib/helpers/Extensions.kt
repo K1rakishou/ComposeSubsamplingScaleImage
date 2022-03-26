@@ -21,13 +21,13 @@ internal fun Result<*>.exceptionOrThrow(): Throwable {
   return exceptionOrNull()!!
 }
 
-fun <T> Result<T>.unwrap(): T {
+internal fun <T> Result<T>.unwrap(): T {
   return getOrThrow()
 }
 
 @Suppress("ReplaceSizeCheckWithIsNotEmpty", "NOTHING_TO_INLINE")
 @OptIn(ExperimentalContracts::class)
-inline fun CharSequence?.isNotNullNorBlank(): Boolean {
+internal inline fun CharSequence?.isNotNullNorBlank(): Boolean {
   contract {
     returns(true) implies (this@isNotNullNorBlank != null)
   }
@@ -35,8 +35,7 @@ inline fun CharSequence?.isNotNullNorBlank(): Boolean {
   return this != null && this.isNotBlank()
 }
 
-
-fun Throwable.isExceptionImportant(): Boolean {
+internal fun Throwable.isExceptionImportant(): Boolean {
   return when (this) {
     is CancellationException,
     is InterruptedIOException,
@@ -45,7 +44,7 @@ fun Throwable.isExceptionImportant(): Boolean {
   }
 }
 
-fun Throwable.errorMessageOrClassName(): String {
+internal fun Throwable.errorMessageOrClassName(): String {
   if (!isExceptionImportant()) {
     return this::class.java.name
   }
@@ -74,7 +73,7 @@ internal fun Int.power(): Int {
 
 @Suppress("ReplaceSizeCheckWithIsNotEmpty", "NOTHING_TO_INLINE")
 @OptIn(ExperimentalContracts::class)
-inline fun <T> Collection<T>?.isNotNullNorEmpty(): Boolean {
+internal inline fun <T> Collection<T>?.isNotNullNorEmpty(): Boolean {
   contract {
     returns(true) implies (this@isNotNullNorEmpty != null)
   }
@@ -82,7 +81,7 @@ inline fun <T> Collection<T>?.isNotNullNorEmpty(): Boolean {
   return this != null && this.size > 0
 }
 
-fun distance(x0: Float, x1: Float, y0: Float, y1: Float): Float {
+internal fun distance(x0: Float, x1: Float, y0: Float, y1: Float): Float {
   val x = x0 - x1
   val y = y0 - y1
   return Math.sqrt((x * x + y * y).toDouble()).toFloat()

@@ -4,14 +4,14 @@ import android.util.Log
 import java.io.PrintWriter
 import java.io.StringWriter
 
-inline fun logcat(
+internal inline fun logcat(
   tag: String,
   message: () -> String
 ) {
   Log.d(tag, message())
 }
 
-inline fun logcatError(
+internal inline fun logcatError(
   tag: String,
   message: () -> String
 ) {

@@ -192,15 +192,18 @@ fun rememberComposeSubsamplingScaleImageState(
 fun ComposeSubsamplingScaleImage(
   modifier: Modifier = Modifier,
   /**
-   * Hack! When ComposeSubsamplingScaleImage is inside of a LazyColumn/Pager you need to provide
-   * A. LazyListState.firstVisibleItemIndex() if it's inside of a LazyColumn/LazyRow
-   * B. PagerState.currentPage() if it's inside of a HorizontalPager/VerticalPager.
-   * This is needed because otherwise multi-touch gesture detector (which detects 2 finger zoom or
-   * 2 finger pan) won't be restarted for the new page/item so the next 2 finger gesture will be
-   * consumed without being processed. There is probably a better solution for this problem than
-   * this but I couldn't figure it out.
-   * If ComposeSubsamplingScaleImage is not inside of either of them then just pass Unit.
-   * See DisplayFullImage() of MainActivity from the sample project.
+   *  TODO!
+   *
+   *  Hack! When ComposeSubsamplingScaleImage is inside of a LazyColumn/Pager you need to provide
+   *  A. LazyListState.firstVisibleItemIndex() if it's inside of a LazyColumn/LazyRow
+   *  B. PagerState.currentPage() if it's inside of a HorizontalPager/VerticalPager.
+   *  This is needed because otherwise multi-touch gesture detector (which detects 2 finger zoom or
+   *  2 finger pan) won't be restarted for the new page/item so the next 2 finger gesture will be
+   *  consumed without being processed. It won't be restarted because it uses an infinite loop
+   *  to detect how many fingers are currently touching the screen.
+   *  There is probably a better solution for this problem than this but I couldn't figure it out.
+   *  If ComposeSubsamplingScaleImage is not inside of either of them then just pass Unit.
+   *  See DisplayFullImage() of MainActivity from the sample project.
    * */
   pointerInputKey: Any = Unit,
   state: ComposeSubsamplingScaleImageState,
@@ -465,8 +468,8 @@ private fun DrawScope.drawDebugInfo(
   val scale = state.currentScale
   val minScale = state.minScale
   val maxScale = state.maxScale
-  val screenTranslateX = state.vTranslate.x
-  val screenTranslateY = state.vTranslate.y
+  val screenTranslateX = state._vTranslate.x
+  val screenTranslateY = state._vTranslate.y
 
   nativeCanvas.drawText(
     formatScaleText(scale, minScale, maxScale),

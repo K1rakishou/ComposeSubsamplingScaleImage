@@ -43,8 +43,8 @@ class ComposeSubsamplingScaleImageState internal constructor(
   val minScaleParam: Float?,
   val maxScaleParam: Float?,
   val doubleTapZoom: Float?,
-  val imageDecoderProvider: ImageDecoderProvider,
-  val decoderDispatcherLazy: Lazy<CoroutineDispatcher>,
+  internal val imageDecoderProvider: ImageDecoderProvider,
+  internal val decoderDispatcherLazy: Lazy<CoroutineDispatcher>,
   val debug: Boolean,
   val minFlingMoveDistPx: Int,
   val minFlingVelocityPxPerSecond: Int,
@@ -72,36 +72,40 @@ class ComposeSubsamplingScaleImageState internal constructor(
   private var needInitScreenTranslate = true
   private var lastInvalidateTime = 0L
 
-  var vTranslate = PointfMut()
+  internal var _vTranslate = PointfMut()
+  val vTranslate: PointF
+    get() = PointF(_vTranslate.x, _vTranslate.y)
+
   var currentScale = 0f
+    internal set
 
   var debugKey: String? = null
     private set
   var sourceImageDimensions: IntSize? = null
     private set
 
-  val bitmapPaint by lazy {
+  internal val bitmapPaint by lazy {
     Paint().apply {
       isAntiAlias = true
       isFilterBitmap = true
       isDither = true
     }
   }
-  val bitmapMatrix by lazy { Matrix() }
-  val srcArray = FloatArray(8)
-  val dstArray = FloatArray(8)
+  internal val bitmapMatrix by lazy { Matrix() }
+  internal val srcArray = FloatArray(8)
+  internal val dstArray = FloatArray(8)
 
   private val subsamplingImageDecoder = AtomicReference<ComposeSubsamplingScaleImageDecoder?>(null)
 
-  val initializationState = mutableStateOf<InitializationState>(InitializationState.Uninitialized)
-  val fullImageSampleSizeState = mutableStateOf(0)
+  internal val initializationState = mutableStateOf<InitializationState>(InitializationState.Uninitialized)
+  internal val fullImageSampleSizeState = mutableStateOf(0)
   internal val availableDimensions = mutableStateOf(IntSize.Zero)
 
   // Tile are loaded asynchronously.
   // invalidate value is incremented every time we decode a new tile.
   // It's needed to notify the composition to redraw current tileMap.
   private val _invalidate = mutableStateOf(0)
-  val invalidate: State<Int>
+  internal val invalidate: State<Int>
     get() = _invalidate
 
   // Width of the composable
@@ -146,7 +150,92 @@ class ComposeSubsamplingScaleImageState internal constructor(
     )
   }
 
-  fun requestInvalidate(forced: Boolean = false) {
+  fun viewToSourceX(vx: Float): Float {
+    return (vx - _vTranslate.x) / currentScale
+  }
+
+  fun viewToSourceY(vy: Float): Float {
+    return (vy - _vTranslate.y) / currentScale
+  }
+
+  fun sourceToViewX(sx: Float): Float {
+    return (sx * currentScale) + _vTranslate.x
+  }
+
+  fun sourceToViewY(sy: Float): Float {
+    return (sy * currentScale) + _vTranslate.y
+  }
+
+  fun limitedScale(targetScale: Float): Float {
+    var resultScale = targetScale
+    resultScale = Math.max(minScale, resultScale)
+    resultScale = Math.min(maxScale, resultScale)
+    return resultScale
+  }
+
+  fun sourceToViewRect(source: RectMut, target: RectMut) {
+    target.set(
+      sourceToViewX(source.left.toFloat()).toInt(),
+      sourceToViewY(source.top.toFloat()).toInt(),
+      sourceToViewX(source.right.toFloat()).toInt(),
+      sourceToViewY(source.bottom.toFloat()).toInt()
+    )
+  }
+
+  fun getCenter(): PointF {
+    val mX: Int = viewWidth / 2
+    val mY: Int = viewHeight / 2
+    return viewToSourceCoord(mX.toFloat(), mY.toFloat())
+  }
+
+  fun viewToSourceCoord(vx: Float, vy: Float): PointF {
+    return viewToSourceCoord(vx, vy, PointF())
+  }
+
+  fun viewToSourceCoord(vxy: PointF): PointF {
+    return viewToSourceCoord(vxy.x, vxy.y, PointF())
+  }
+
+  fun viewToSourceCoord(vx: Float, vy: Float, sTarget: PointF): PointF {
+    sTarget.set(viewToSourceX(vx), viewToSourceY(vy))
+    return sTarget
+  }
+
+  fun sourceToViewCoord(sxy: PointF): PointF {
+    return sourceToViewCoord(sxy.x, sxy.y, PointF())
+  }
+
+  fun sourceToViewCoord(sx: Float, sy: Float): PointF {
+    return sourceToViewCoord(sx, sy, PointF())
+  }
+
+  fun sourceToViewCoord(sx: Float, sy: Float, vTarget: PointF): PointF {
+    vTarget.set(sourceToViewX(sx), sourceToViewY(sy))
+    return vTarget
+  }
+
+  fun getPanInfo(
+    horizontalTolerance: Float = PanInfo.DEFAULT_TOLERANCE,
+    verticalTolerance: Float = PanInfo.DEFAULT_TOLERANCE
+  ): PanInfo? {
+    if (!isReady) {
+      return null
+    }
+
+    val scaleWidth: Float = currentScale * sWidth
+    val scaleHeight: Float = currentScale * sHeight
+
+    return PanInfo(
+      top = Math.max(0f, -_vTranslate.y),
+      left = Math.max(0f, -_vTranslate.x),
+      bottom = Math.max(0f, scaleHeight + _vTranslate.y - viewHeight),
+      right = Math.max(0f, scaleWidth + _vTranslate.x - viewWidth),
+      horizontalTolerance = horizontalTolerance,
+      verticalTolerance = verticalTolerance
+    )
+  }
+
+  internal fun requestInvalidate(forced: Boolean = false) {
     if (!forced && (SystemClock.elapsedRealtime() - lastInvalidateTime < animationUpdateIntervalMs)) {
       return
     }
@@ -163,7 +252,7 @@ class ComposeSubsamplingScaleImageState internal constructor(
     tileMap.clear()
 
     debugKey = null
-    vTranslate.set(0f, 0f)
+    _vTranslate.set(0f, 0f)
     satTemp.reset()
     bitmapMatrix.reset()
     sourceImageDimensions = null
@@ -184,7 +273,7 @@ class ComposeSubsamplingScaleImageState internal constructor(
     return defaultDoubleTapZoom
   }
 
-  suspend fun initialize(
+  internal suspend fun initialize(
     imageSourceProvider: ImageSourceProvider,
     eventListener: ComposeSubsamplingScaleImageEventListener?
   ): InitializationState {
@@ -405,7 +494,7 @@ class ComposeSubsamplingScaleImageState internal constructor(
     return Result.success(Unit)
   }
 
-  fun refreshRequiredTiles(load: Boolean) {
+  internal fun refreshRequiredTiles(load: Boolean) {
     BackgroundUtils.ensureMainThread()
 
     coroutineScope.launch(Dispatchers.Main.immediate) {
@@ -503,22 +592,6 @@ class ComposeSubsamplingScaleImageState internal constructor(
       || sVisTop > tile.sourceRect.bottom
       || tile.sourceRect.top > sVisBottom
     )
-  }
-
-  private fun viewToSourceX(vx: Float): Float {
-    return (vx - vTranslate.x) / currentScale
-  }
-
-  private fun viewToSourceY(vy: Float): Float {
-    return (vy - vTranslate.y) / currentScale
-  }
-
-  fun sourceToViewX(sx: Float): Float {
-    return (sx * currentScale) + vTranslate.x
-  }
-
-  fun sourceToViewY(sy: Float): Float {
-    return (sy * currentScale) + vTranslate.y
   }
 
   internal fun calculateInSampleSize(sourceWidth: Int, sourceHeight: Int, scale: Float): Int {
@@ -625,19 +698,19 @@ class ComposeSubsamplingScaleImageState internal constructor(
     }
   }
 
-  fun fitToBounds(center: Boolean) {
+  internal fun fitToBounds(center: Boolean) {
     satTemp.scale = currentScale
-    satTemp.vTranslate.set(vTranslate.x, vTranslate.y)
+    satTemp.vTranslate.set(_vTranslate.x, _vTranslate.y)
 
     fitToBounds(center, satTemp)
 
     currentScale = satTemp.scale
-    vTranslate.set(satTemp.vTranslate.x, satTemp.vTranslate.y)
+    _vTranslate.set(satTemp.vTranslate.x, satTemp.vTranslate.y)
 
     if (needInitScreenTranslate) {
       needInitScreenTranslate = false
 
-      vTranslate.set(
+      _vTranslate.set(
         vTranslateForSCenter(
           sCenterX = (sWidth / 2).toFloat(),
           sCenterY = (sHeight / 2).toFloat(),
@@ -707,13 +780,6 @@ class ComposeSubsamplingScaleImageState internal constructor(
     sat.scale = scale
   }
 
-  fun limitedScale(targetScale: Float): Float {
-    var resultScale = targetScale
-    resultScale = Math.max(minScale, resultScale)
-    resultScale = Math.min(maxScale, resultScale)
-    return resultScale
-  }
-
   private fun calculateMaxScale(minDpi: Int): Float {
     if (maxScaleParam != null) {
       return maxScaleParam
@@ -728,7 +794,7 @@ class ComposeSubsamplingScaleImageState internal constructor(
     return averageDpi / minDpi
   }
 
-  fun calculateMinScale(): Float {
+  internal fun calculateMinScale(): Float {
     // TODO(KurobaEx): paddings
     val hPadding = 0
     val vPadding = 0
@@ -772,6 +838,85 @@ class ComposeSubsamplingScaleImageState internal constructor(
     }
   }
 
+  internal fun limitedSCenter(
+    sCenterX: Float,
+    sCenterY: Float,
+    scale: Float,
+    sTarget: PointF
+  ): PointF {
+    val vTranslate = vTranslateForSCenter(sCenterX, sCenterY, scale)
+
+    val vxCenter: Int = viewWidth / 2
+    val vyCenter: Int = viewHeight / 2
+
+    val sx = (vxCenter - vTranslate.x) / scale
+    val sy = (vyCenter - vTranslate.y) / scale
+    sTarget.set(sx, sy)
+    return sTarget
+  }
+
+  internal fun vTranslateForSCenter(sCenterX: Float, sCenterY: Float, scale: Float): PointfMut {
+    val vxCenter: Int = viewWidth / 2
+    val vyCenter: Int = viewHeight / 2
+
+    satTemp.scale = scale
+    satTemp.vTranslate.set(vxCenter - sCenterX * scale, vyCenter - sCenterY * scale)
+
+    fitToBounds(true, satTemp)
+    return satTemp.vTranslate
+  }
+
+  internal fun ease(
+    gestureAnimationEasing: GestureAnimationEasing,
+    time: Long,
+    from: Float,
+    change: Float,
+    duration: Long
+  ): Float {
+    return when (gestureAnimationEasing) {
+      GestureAnimationEasing.EaseInOutQuad -> easeInOutQuad(time, from, change, duration)
+      GestureAnimationEasing.EaseOutQuad -> easeOutQuad(time, from, change, duration)
+      else -> throw java.lang.IllegalStateException("Unexpected easing type: $gestureAnimationEasing")
+    }
+  }
+
+  private fun easeOutQuad(time: Long, from: Float, change: Float, duration: Long): Float {
+    val progress = time.toFloat() / duration.toFloat()
+    return -change * progress * (progress - 2) + from
+  }
+
+  private fun easeInOutQuad(time: Long, from: Float, change: Float, duration: Long): Float {
+    var timeF = time / (duration / 2f)
+
+    if (timeF < 1) {
+      return change / 2f * timeF * timeF + from
+    }
+
+    timeF--
+    return -change / 2f * (timeF * (timeF - 2) - 1) + from
+  }
+
+  internal fun preDraw() {
+    if (!isReady || sourceImageDimensions == null || viewWidth <= 0 || viewHeight <= 0) {
+      return
+    }
+
+    val imageSaveableState = pendingImageSaveableState
+      ?: return
+
+    val pendingScale = imageSaveableState.scale
+    val sPendingCenterX = imageSaveableState.center.x
+    val sPendingCenterY = imageSaveableState.center.y
+
+    currentScale = pendingScale
+    _vTranslate.x = (viewWidth / 2) - (currentScale * sPendingCenterX)
+    _vTranslate.y = (viewHeight / 2) - (currentScale * sPendingCenterY)
+    pendingImageSaveableState = null
+
+    fitToBounds(true)
+    refreshRequiredTiles(true)
+  }
+
   private fun getResources(): Resources = context.resources
 
   @SuppressLint("LongLogTag")
@@ -802,141 +947,6 @@ class ComposeSubsamplingScaleImageState internal constructor(
     }
 
     Log.e(TAG, msg)
-  }
-
-  internal fun sourceToViewRect(source: RectMut, target: RectMut) {
-    target.set(
-      sourceToViewX(source.left.toFloat()).toInt(),
-      sourceToViewY(source.top.toFloat()).toInt(),
-      sourceToViewX(source.right.toFloat()).toInt(),
-      sourceToViewY(source.bottom.toFloat()).toInt()
-    )
-  }
-
-  fun getCenter(): PointF {
-    val mX: Int = viewWidth / 2
-    val mY: Int = viewHeight / 2
-    return viewToSourceCoord(mX.toFloat(), mY.toFloat())
-  }
-
-  fun viewToSourceCoord(vx: Float, vy: Float): PointF {
-    return viewToSourceCoord(vx, vy, PointF())
-  }
-
-  fun viewToSourceCoord(vxy: PointF): PointF {
-    return viewToSourceCoord(vxy.x, vxy.y, PointF())
-  }
-
-  fun viewToSourceCoord(vx: Float, vy: Float, sTarget: PointF): PointF {
-    sTarget.set(viewToSourceX(vx), viewToSourceY(vy))
-    return sTarget
-  }
-
-  fun sourceToViewCoord(sxy: PointF): PointF {
-    return sourceToViewCoord(sxy.x, sxy.y, PointF())
-  }
-
-  fun sourceToViewCoord(sx: Float, sy: Float): PointF {
-    return sourceToViewCoord(sx, sy, PointF())
-  }
-
-  fun sourceToViewCoord(sx: Float, sy: Float, vTarget: PointF): PointF {
-    vTarget.set(sourceToViewX(sx), sourceToViewY(sy))
-    return vTarget
-  }
-
-  fun limitedSCenter(
-    sCenterX: Float,
-    sCenterY: Float,
-    scale: Float,
-    sTarget: PointF
-  ): PointF {
-    val vTranslate = vTranslateForSCenter(sCenterX, sCenterY, scale)
-
-    val vxCenter: Int = viewWidth / 2
-    val vyCenter: Int = viewHeight / 2
-
-    val sx = (vxCenter - vTranslate.x) / scale
-    val sy = (vyCenter - vTranslate.y) / scale
-    sTarget.set(sx, sy)
-    return sTarget
-  }
-
-  fun vTranslateForSCenter(sCenterX: Float, sCenterY: Float, scale: Float): PointfMut {
-    val vxCenter: Int = viewWidth / 2
-    val vyCenter: Int = viewHeight / 2
-
-    satTemp.scale = scale
-    satTemp.vTranslate.set(vxCenter - sCenterX * scale, vyCenter - sCenterY * scale)
-
-    fitToBounds(true, satTemp)
-    return satTemp.vTranslate
-  }
-
-  fun ease(gestureAnimationEasing: GestureAnimationEasing, time: Long, from: Float, change: Float, duration: Long): Float {
-    return when (gestureAnimationEasing) {
-      GestureAnimationEasing.EaseInOutQuad -> easeInOutQuad(time, from, change, duration)
-      GestureAnimationEasing.EaseOutQuad -> easeOutQuad(time, from, change, duration)
-      else -> throw java.lang.IllegalStateException("Unexpected easing type: $gestureAnimationEasing")
-    }
-  }
-
-  fun getPanInfo(
-    horizontalTolerance: Float = PanInfo.DEFAULT_TOLERANCE,
-    verticalTolerance: Float = PanInfo.DEFAULT_TOLERANCE
-  ): PanInfo? {
-    if (!isReady) {
-      return null
-    }
-
-    val scaleWidth: Float = currentScale * sWidth
-    val scaleHeight: Float = currentScale * sHeight
-
-    return PanInfo(
-      top = Math.max(0f, -vTranslate.y),
-      left = Math.max(0f, -vTranslate.x),
-      bottom = Math.max(0f, scaleHeight + vTranslate.y - viewHeight),
-      right = Math.max(0f, scaleWidth + vTranslate.x - viewWidth),
-      horizontalTolerance = horizontalTolerance,
-      verticalTolerance = verticalTolerance
-    )
-  }
-
-  private fun easeOutQuad(time: Long, from: Float, change: Float, duration: Long): Float {
-    val progress = time.toFloat() / duration.toFloat()
-    return -change * progress * (progress - 2) + from
-  }
-
-  private fun easeInOutQuad(time: Long, from: Float, change: Float, duration: Long): Float {
-    var timeF = time / (duration / 2f)
-
-    if (timeF < 1) {
-      return change / 2f * timeF * timeF + from
-    }
-
-    timeF--
-    return -change / 2f * (timeF * (timeF - 2) - 1) + from
-  }
-
-  fun preDraw() {
-    if (!isReady || sourceImageDimensions == null || viewWidth <= 0 || viewHeight <= 0) {
-      return
-    }
-
-    val imageSaveableState = pendingImageSaveableState
-      ?: return
-
-    val pendingScale = imageSaveableState.scale
-    val sPendingCenterX = imageSaveableState.center.x
-    val sPendingCenterY = imageSaveableState.center.y
-
-    currentScale = pendingScale
-    vTranslate.x = (viewWidth / 2) - (currentScale * sPendingCenterX)
-    vTranslate.y = (viewHeight / 2) - (currentScale * sPendingCenterY)
-    pendingImageSaveableState = null
-
-    fitToBounds(true)
-    refreshRequiredTiles(true)
   }
 
   companion object {

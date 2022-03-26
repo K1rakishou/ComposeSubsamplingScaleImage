@@ -37,7 +37,7 @@ class MultiTouchGestureDetector(
     isPanningOrZooming = false
     scaleStart = state.currentScale
     vDistStart = distance
-    vTranslateStart.set(state.vTranslate.x, state.vTranslate.y)
+    vTranslateStart.set(state._vTranslate.x, state._vTranslate.y)
     vCenterStart.set(
       (firstPointerChange.position.x + secondPointerChange.position.x) / 2,
       (firstPointerChange.position.y + secondPointerChange.position.y) / 2
@@ -77,15 +77,15 @@ class MultiTouchGestureDetector(
         vDistStart = vDistEnd
         scaleStart = state.minScale
         vCenterStart.set(vCenterEndX, vCenterEndX)
-        vTranslateStart.set(state.vTranslate.x, state.vTranslate.y)
+        vTranslateStart.set(state._vTranslate.x, state._vTranslate.y)
       } else {
         val vLeftStart = vCenterStart.x - vTranslateStart.x
         val vTopStart = vCenterStart.y - vTranslateStart.y
         val vLeftNow: Float = vLeftStart * (state.currentScale / scaleStart)
         val vTopNow: Float = vTopStart * (state.currentScale / scaleStart)
 
-        state.vTranslate.x = vCenterEndX - vLeftNow
-        state.vTranslate.y = vCenterEndY - vTopNow
+        state._vTranslate.x = vCenterEndX - vLeftNow
+        state._vTranslate.y = vCenterEndY - vTopNow
 
         if (
           (previousScale * state.sHeight < state.viewHeight && state.currentScale * state.sHeight >= state.viewHeight) ||
@@ -93,7 +93,7 @@ class MultiTouchGestureDetector(
         ) {
           state.fitToBounds(true)
           vCenterStart.set(vCenterEndX, vCenterEndY)
-          vTranslateStart.set(state.vTranslate.x, state.vTranslate.y)
+          vTranslateStart.set(state._vTranslate.x, state._vTranslate.y)
           scaleStart = state.currentScale
           vDistStart = vDistEnd
         }
@@ -113,7 +113,7 @@ class MultiTouchGestureDetector(
     scaleStart = 1f
     vDistStart = 0f
     vCenterStart.set(0f, 0f)
-    vTranslateStart.set(state.vTranslate.x, state.vTranslate.y)
+    vTranslateStart.set(state._vTranslate.x, state._vTranslate.y)
 
     if (state.isReadyForGestures) {
       state.refreshRequiredTiles(load = true)
