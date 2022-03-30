@@ -896,6 +896,11 @@ class ComposeSubsamplingScaleImageState internal constructor(
     return -change / 2f * (timeF * (timeF - 2) - 1) + from
   }
 
+  internal fun onSizeChanged() {
+    pendingImageSaveableState = ImageSaveableState(currentScale, getCenter())
+    requestInvalidate(forced = true)
+  }
+
   internal fun preDraw() {
     if (!isReady || sourceImageDimensions == null || viewWidth <= 0 || viewHeight <= 0) {
       return

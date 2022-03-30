@@ -8,7 +8,7 @@ import android.view.ViewConfiguration
 import android.view.WindowManager
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -198,6 +198,7 @@ fun ComposeSubsamplingScaleImage(
    *  Hack! When ComposeSubsamplingScaleImage is inside of a LazyColumn/Pager you need to provide
    *  A. LazyListState.firstVisibleItemIndex() if it's inside of a LazyColumn/LazyRow
    *  B. PagerState.currentPage() if it's inside of a HorizontalPager/VerticalPager.
+   *  as the pointerInputKey parameter.
    *
    *  This is needed because otherwise multi-touch gesture detector (MultiTouchGestureDetector)
    *  (which detects 2 finger zoom or 2 finger pan) won't be restarted for the new page/item
@@ -210,8 +211,10 @@ fun ComposeSubsamplingScaleImage(
    *  pager page.
    *
    *  If ComposeSubsamplingScaleImage is not inside of either of them then just pass Unit.
-   *  See DisplayFullImage() of MainActivity from the sample project. I didn't make pointerInputKey
-   *  to have Unit as the default parameter so that you are aware of this potential bug.
+   *  See DisplayFullImage() of MainActivity from the sample project.
+   *
+   *  I didn't make pointerInputKey to have Unit as the default parameter so that you are aware
+   *  of this potential bug.
    * */
   pointerInputKey: Any /*= Unit*/,
   state: ComposeSubsamplingScaleImageState,
@@ -249,8 +252,7 @@ fun ComposeSubsamplingScaleImage(
     })
 
   BoxWithConstraints(
-    modifier = Modifier
-      .fillMaxSize()
+    modifier = modifier
       .pointerInput(
         key1 = pointerInputKey,
         block = {
@@ -264,20 +266,32 @@ fun ComposeSubsamplingScaleImage(
   ) {
     val minWidthPx = with(density) { remember(key1 = minWidth) { minWidth.toPx().toInt() } }
     val minHeightPx = with(density) { remember(key1 = minHeight) { minHeight.toPx().toInt() } }
+    var initializationState by state.initializationState
 
-    LaunchedEffect(
-      key1 = minWidth,
-      key2 = minHeight,
-      block = {
-        if (minWidthPx <= 0 || minHeightPx <= 0) {
-          return@LaunchedEffect
+    if (minWidthPx > 0 && minHeightPx > 0) {
+      LaunchedEffect(
+        key1 = Unit,
+        block = {
+          state.availableDimensions.value = IntSize(minWidthPx, minHeightPx)
+          initializationState = state.initialize(imageSourceProvider, eventListener)
         }
+      )
 
-        state.availableDimensions.value = IntSize(minWidthPx, minHeightPx)
-        val initializationState = state.initialize(imageSourceProvider, eventListener)
-        state.initializationState.value = initializationState
-      }
-    )
+      LaunchedEffect(
+        key1 = minWidthPx,
+        key2 = minHeightPx,
+        key3 = initializationState,
+        block = {
+          if (
+            initializationState is InitializationState.Success &&
+            (state.viewWidth != minWidthPx || state.viewHeight != minHeightPx)
+          ) {
+            state.availableDimensions.value = IntSize(minWidthPx, minHeightPx)
+            state.onSizeChanged()
+          }
+        }
+      )
+    }
 
     val initializationMut by state.initializationState
 
@@ -293,7 +307,7 @@ fun ComposeSubsamplingScaleImage(
         val fullImageSampleSize by state.fullImageSampleSizeState
 
         Canvas(
-          modifier = modifier.then(Modifier.clipToBounds()),
+          modifier = Modifier.size(minWidth, minHeight).clipToBounds(),
           onDraw = {
             DrawTileGrid(
               state = state,
