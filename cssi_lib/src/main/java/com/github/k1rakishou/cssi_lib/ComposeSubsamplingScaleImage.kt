@@ -72,31 +72,38 @@ private val tileDebugColors by lazy {
  * This is basically the scroll inertia.
  * Note: quick zoom animation is an animation that is executed after double-tapping (zoom in/zoom out).
  *
+ * [scrollableContainerDirection] If you put inside of a scrollable container you need to specify this
+ * parameter (depending on what scroll direction the container has like if it's HorizontalPager/lazyRow
+ * then it's Horizontal, if it's VerticalPager/LazyColumn then it's vertical, if it's not inside of
+ * a scrollable container then just pass null) so that ComposeSubsamplingScaleImage can allow that container
+ * to scroll when it's completely zoomed out or the viewport is touching certain side(s) of the screen.
  * [minFlingMoveDistPx] how many pixels a finger must move before we start considering
- * it a fling and run the fling animation. The higher the value is the harder it will be to trigger
- * fling animation.
+ * it a fling and run the fling animation (when the finger no longer touches the screen).
+ * The higher the value is the harder it will be to trigger fling animation.
  * [minFlingVelocityPxPerSecond] the minimum speed required for us to start the fling animation.
  * [quickZoomTimeoutMs] the maximum wait time between taps before a gesture is considered the quick
  * zoom gesture and we either run the quick zoom animation or the gesture becomes the single finger
  * zoom gesture.
+ * [zoomAnimationDurationMs] the duration of the double-tap zoom in/out animation
  * [flingAnimationDurationMs] the duration of the fling animation
+ * [doubleTapZoom] how far in double-tap should zoom.
+ * [minScale] minimum allowed scale.
+ * [maxScale] maximum allowed scale.
  * [maxMaxTileSize] the maximum size of a tile before we start subdividing it into smaller tiles.
  * The higher it is the better since we will have to decode less tiles which will make image region
  * loading faster (less regions to decode -> the faster it is). We can't set to be Int.MAX_VALUE or
  * some other big number because Canvas has internal limitations on the bitmap size.
  * See https://developer.android.com/reference/android/graphics/Canvas#getMaximumBitmapHeight() and
  * https://developer.android.com/reference/android/graphics/Canvas#getMaximumBitmapWidth()
+ * [minimumScaleType] strategy to fit the image inside of the screen bounds when the viewport is
+ * zoomed out to the maximum.
  * [decoderDispatcherLazy] the coroutine dispatcher that will be used to decode images.
  * [imageDecoderProvider] the bitmap decoder that does the job
- * [scrollableContainerDirection] If you put inside of a scrollable container you need to specify this
- * parameter (depending on what scroll direction the container has like if it's HorizontalPager/lazyRow
- * then it's Horizontal, if it's VerticalPager/LazyColumn then it's vertical, if it's not inside of
- * any scrollable container then null) so that ComposeSubsamplingScaleImage can allow that container
- * to scroll when it's completely zoomed out or touching certain side(s) of the container.
- * [debug] enables/disables internal logging
+ * [debug] enables/disables internal logging + debug drawing.
  * */
 @Composable
 fun rememberComposeSubsamplingScaleImageState(
+  scrollableContainerDirection: ScrollableContainerDirection?,
   minFlingMoveDistPx: Int = 50,
   minFlingVelocityPxPerSecond: Int? = null,
   quickZoomTimeoutMs: Int? = null,
@@ -105,7 +112,6 @@ fun rememberComposeSubsamplingScaleImageState(
   doubleTapZoom: Float? = null,
   minScale: Float? = null,
   maxScale: Float? = null,
-  scrollableContainerDirection: ScrollableContainerDirection? = null,
   maxMaxTileSize: () -> MaxTileSize = { MaxTileSize.Auto() },
   minimumScaleType: () -> MinimumScaleType = { MinimumScaleType.ScaleTypeCenterInside },
   decoderDispatcherLazy: Lazy<CoroutineDispatcher> = defaultDecoderDispatcher,
