@@ -45,85 +45,267 @@ internal suspend fun PointerInputScope.processGestures(
   multiTouchGestureDetector: MultiTouchGestureDetector?
 ) {
   val quickZoomTimeoutMs = state.quickZoomTimeoutMs
+  val debug = state.debug
   val activeDetectorJobs = arrayOfNulls<Job?>(DetectorType.values().size)
-  val allDetectors = arrayOf(zoomGestureDetector, panGestureDetector).filterNotNull()
+  var detectAllUpJob: Job? = null
+  var hasAnyPointersDown = false
 
-  fun stopOtherDetectors(excludeDetectorType: DetectorType) {
-    for (index in activeDetectorJobs.indices) {
-      if (index == excludeDetectorType.index) {
-        continue
+  fun stopDetectAllUpJob() {
+    detectAllUpJob?.cancel()
+    detectAllUpJob = null
+  }
+
+  val allDetectors = arrayOf(zoomGestureDetector, panGestureDetector, multiTouchGestureDetector)
+    .filterNotNull()
+
+  forEachGesture {
+    try {
+      if (debug) {
+        logcat(TAG) { "forEachGesture() start" }
       }
 
-      activeDetectorJobs[index]?.cancel()
-      activeDetectorJobs[index] = null
+      activeDetectorJobs.forEachIndexed { index, job ->
+        job?.cancel()
+        activeDetectorJobs[index] = null
+      }
+
+      stopDetectAllUpJob()
+
+      coroutineScope {
+        coroutineContext[Job]!!.invokeOnCompletion { cause ->
+          if (cause == null) {
+            return@invokeOnCompletion
+          }
+
+          allDetectors.fastForEach { detector -> detector.cancelAnimation() }
+        }
+
+        if (onTap != null || onLongTap != null) {
+          activeDetectorJobs[DetectorType.Tap.index] = launch {
+            try {
+              if (debug) {
+                logcat(TAG) { "detectTapOrLongTapGestures() start" }
+              }
+
+              detectTapOrLongTapGestures(
+                debug = state.debug,
+                coroutineScope = this,
+                onTap = onTap,
+                onLongTap = onLongTap,
+                detectorType = DetectorType.Tap,
+                cancelAnimations = { allDetectors.fastForEach { detector -> detector.cancelAnimation() } },
+                stopOtherDetectors = { detectorType -> stopOtherDetectors(activeDetectorJobs, detectorType) },
+                gesturesLocked = { allDetectors.fastAny { detector -> detector.animating } }
+              )
+            } finally {
+              activeDetectorJobs[DetectorType.Tap.index]?.cancel()
+              activeDetectorJobs[DetectorType.Tap.index] = null
+
+              if (checkAndCancelWholeScope(debug, activeDetectorJobs, hasAnyPointersDown)) {
+                if (debug) {
+                  logcat(TAG) { "detectTapOrLongTapGestures() calling stopOtherDetectors()" }
+                }
+
+                stopOtherDetectors(activeDetectorJobs)
+                stopDetectAllUpJob()
+              }
+
+              if (debug) {
+                logcat(TAG) { "detectTapOrLongTapGestures() end" }
+              }
+            }
+          }
+        }
+
+        activeDetectorJobs[DetectorType.Zoom.index] = launch {
+          try {
+            if (debug) {
+              logcat(TAG) { "detectZoomGestures() start" }
+            }
+
+            detectZoomGestures(
+              quickZoomTimeoutMs = quickZoomTimeoutMs,
+              zoomGestureDetector = zoomGestureDetector,
+              coroutineScope = this,
+              detectorType = DetectorType.Zoom,
+              cancelAnimations = { allDetectors.fastForEach { detector -> detector.cancelAnimation() } },
+              stopOtherDetectors = { detectorType -> stopOtherDetectors(activeDetectorJobs, detectorType) },
+              gesturesLocked = { allDetectors.fastAny { detector -> detector.animating } }
+            )
+          } finally {
+            activeDetectorJobs[DetectorType.Zoom.index]?.cancel()
+            activeDetectorJobs[DetectorType.Zoom.index] = null
+
+            if (checkAndCancelWholeScope(debug, activeDetectorJobs, hasAnyPointersDown)) {
+              if (debug) {
+                logcat(TAG) { "detectZoomGestures() calling stopOtherDetectors()" }
+              }
+
+              stopOtherDetectors(activeDetectorJobs)
+              stopDetectAllUpJob()
+            }
+
+            if (debug) {
+              logcat(TAG) { "detectZoomGestures() end" }
+            }
+          }
+        }
+
+        activeDetectorJobs[DetectorType.Pan.index] = launch {
+          try {
+            if (debug) {
+              logcat(TAG) { "detectPanGestures() start" }
+            }
+
+            detectPanGestures(
+              state = state,
+              panGestureDetector = panGestureDetector,
+              coroutineScope = this,
+              detectorType = DetectorType.Pan,
+              cancelAnimations = { allDetectors.fastForEach { detector -> detector.cancelAnimation() } },
+              stopOtherDetectors = { detectorType -> stopOtherDetectors(activeDetectorJobs, detectorType) },
+              gesturesLocked = { allDetectors.fastAny { detector -> detector.animating } }
+            )
+          } finally {
+            activeDetectorJobs[DetectorType.Pan.index]?.cancel()
+            activeDetectorJobs[DetectorType.Pan.index] = null
+
+            if (checkAndCancelWholeScope(debug, activeDetectorJobs, hasAnyPointersDown)) {
+              if (debug) {
+                logcat(TAG) { "detectPanGestures() calling stopOtherDetectors()" }
+              }
+
+              stopOtherDetectors(activeDetectorJobs)
+              stopDetectAllUpJob()
+            }
+
+            if (debug) {
+              logcat(TAG) { "detectPanGestures() end" }
+            }
+          }
+        }
+
+        activeDetectorJobs[DetectorType.MultiTouch.index] = launch {
+          try {
+            if (debug) {
+              logcat(TAG) { "detectMultiTouchGestures() start" }
+            }
+
+            detectMultiTouchGestures(
+              multiTouchGestureDetector = multiTouchGestureDetector,
+              coroutineScope = this,
+              detectorType = DetectorType.MultiTouch,
+              cancelAnimations = { allDetectors.fastForEach { detector -> detector.cancelAnimation() } },
+              stopOtherDetectors = { detectorType -> stopOtherDetectors(activeDetectorJobs, detectorType) },
+              gesturesLocked = { allDetectors.fastAny { detector -> detector.animating } }
+            )
+          } finally {
+            activeDetectorJobs[DetectorType.MultiTouch.index]?.cancel()
+            activeDetectorJobs[DetectorType.MultiTouch.index] = null
+
+            if (checkAndCancelWholeScope(debug, activeDetectorJobs, hasAnyPointersDown)) {
+              if (debug) {
+                logcat(TAG) { "detectMultiTouchGestures() calling stopOtherDetectors()" }
+              }
+
+              stopOtherDetectors(activeDetectorJobs)
+              stopDetectAllUpJob()
+            }
+
+            if (debug) {
+              logcat(TAG) { "detectMultiTouchGestures() end" }
+            }
+          }
+        }
+
+        detectAllUpJob = launch {
+          if (debug) {
+            logcat(TAG) { "detectAllUp() start" }
+          }
+
+          try {
+            while (isActive) {
+              awaitPointerEventScope { awaitFirstDown(requireUnconsumed = false) }
+              hasAnyPointersDown = true
+              awaitPointerEventScope { awaitAllPointersUp() }
+              hasAnyPointersDown = false
+
+              if (checkAndCancelWholeScope(debug, activeDetectorJobs, false)) {
+                break
+              }
+            }
+          } finally {
+            hasAnyPointersDown = false
+
+            stopOtherDetectors(activeDetectorJobs)
+
+            if (debug) {
+              logcat(TAG) { "detectAllUp() end" }
+            }
+          }
+        }
+      }
+    } finally {
+      if (debug) {
+        logcat(TAG) { "forEachGesture() end" }
+      }
+    }
+  }
+}
+
+/**
+ * This function is needed to cancel the infinite loop inside of the MultiTouch gesture
+ * detector. It checks whether all gesture detectors are done normally, or there is only
+ * multitouch detector left and there are no pointers touching the screen. If any of those
+ * is true it cancels everything so that we are ready to handle next gestures.
+ * */
+private fun checkAndCancelWholeScope(
+  debug: Boolean,
+  activeDetectorJobs: Array<Job?>,
+  hasAnyPointersDown: Boolean
+): Boolean {
+  val activeDetectors = activeDetectorJobs.mapIndexed { index, job ->
+    if (job != null) {
+      return@mapIndexed DetectorType.from(index)
+    }
+
+    return@mapIndexed null
+  }.filterNotNull()
+
+  if (activeDetectors.isEmpty()) {
+    if (debug) {
+      logcat(TAG) { "checkAndCancelWholeScope() no activeDetectors" }
+    }
+
+    return true
+  }
+
+  val isMultiTouchActive = activeDetectors
+    .firstOrNull { detectorType -> detectorType == DetectorType.MultiTouch } != null
+
+  if (debug) {
+    logcat(TAG) {
+      "checkAndCancelWholeScope() activeDetectors=$activeDetectors, " +
+        "isMultiTouchActive=$isMultiTouchActive, " +
+        "hasAnyPointersDown=$hasAnyPointersDown"
     }
   }
 
-  forEachGesture {
-    activeDetectorJobs.forEachIndexed { index, job ->
-      job?.cancel()
-      activeDetectorJobs[index] = null
+  if (isMultiTouchActive && activeDetectors.size == 1 && !hasAnyPointersDown) {
+    return true
+  }
+
+  return false
+}
+
+private fun stopOtherDetectors(activeDetectorJobs: Array<Job?>, exclude: DetectorType? = null) {
+  for (index in activeDetectorJobs.indices) {
+    if (exclude != null && index == exclude.index) {
+      continue
     }
 
-    coroutineScope {
-      coroutineContext[Job]!!.invokeOnCompletion { cause ->
-        if (cause == null) {
-          return@invokeOnCompletion
-        }
-
-        allDetectors.fastForEach { detector -> detector.cancelAnimation() }
-      }
-
-      if (onTap != null || onLongTap != null) {
-        activeDetectorJobs[DetectorType.Tap.index] = launch {
-          detectTapOrLongTapGestures(
-            debug = state.debug,
-            coroutineScope = this,
-            onTap = onTap,
-            onLongTap = onLongTap,
-            detectorType = DetectorType.Tap,
-            cancelAnimations = { allDetectors.fastForEach { detector -> detector.cancelAnimation() } },
-            stopOtherDetectors = { detectorType -> stopOtherDetectors(detectorType) },
-            gesturesLocked = { allDetectors.fastAny { detector -> detector.animating } }
-          )
-        }
-      }
-
-      activeDetectorJobs[DetectorType.Zoom.index] = launch {
-        detectZoomGestures(
-          quickZoomTimeoutMs = quickZoomTimeoutMs,
-          zoomGestureDetector = zoomGestureDetector,
-          coroutineScope = this,
-          detectorType = DetectorType.Zoom,
-          cancelAnimations = { allDetectors.fastForEach { detector -> detector.cancelAnimation() } },
-          stopOtherDetectors = { detectorType -> stopOtherDetectors(detectorType) },
-          gesturesLocked = { allDetectors.fastAny { detector -> detector.animating } }
-        )
-      }
-
-      activeDetectorJobs[DetectorType.Pan.index] = launch {
-        detectPanGestures(
-          state = state,
-          panGestureDetector = panGestureDetector,
-          coroutineScope = this,
-          detectorType = DetectorType.Pan,
-          cancelAnimations = { allDetectors.fastForEach { detector -> detector.cancelAnimation() } },
-          stopOtherDetectors = { detectorType -> stopOtherDetectors(detectorType) },
-          gesturesLocked = { allDetectors.fastAny { detector -> detector.animating } }
-        )
-      }
-
-      activeDetectorJobs[DetectorType.MultiTouch.index] = launch {
-        detectMultiTouchGestures(
-          multiTouchGestureDetector = multiTouchGestureDetector,
-          coroutineScope = this,
-          detectorType = DetectorType.MultiTouch,
-          cancelAnimations = { allDetectors.fastForEach { detector -> detector.cancelAnimation() } },
-          stopOtherDetectors = { detectorType -> stopOtherDetectors(detectorType) },
-          gesturesLocked = { allDetectors.fastAny { detector -> detector.animating } }
-        )
-      }
-    }
+    activeDetectorJobs[index]?.cancel()
+    activeDetectorJobs[index] = null
   }
 }
 
@@ -167,6 +349,21 @@ private suspend fun PointerInputScope.detectTapOrLongTapGestures(
     var upOrCancel: PointerInputChange? = null
     try {
       upOrCancel = withTimeout(longPressTimeout) { waitForUpOrCancellation() }
+
+      if (upOrCancel != null) {
+        val touchSlop = viewConfiguration.touchSlop
+        val distance = (upOrCancel.position - firstDown.position).getDistance().absoluteValue
+
+        if (distance > touchSlop) {
+          if (debug) {
+            logcat(tag = TAG) { "tap() distance ($distance) exceeds touchSlop ($touchSlop), detectorType=${detectorType}" }
+          }
+          // The distance between the touch start and end exceeds touchSlop so this gesture is neither
+          // the tap nor long tap.
+          return@awaitPointerEventScope
+        }
+      }
+
       upOrCancel?.consumeDownChange()
     } catch (_: PointerEventTimeoutCancellationException) {
       stopOtherDetectors(detectorType)
@@ -237,63 +434,68 @@ private suspend fun PointerInputScope.detectPanGestures(
       return@awaitPointerEventScope
     }
 
-    when (state.scrollableContainerDirection) {
-      ScrollableContainerDirection.Horizontal -> {
-        // If we are inside of a horizontally scrollable container (LazyRow/HorizontalPager) and
-        // we are touching both left and right sides of the screen then cancel this gesture and
-        // allow parent container scrolling
-        if (panInfo.touchesLeftAndRight()) {
-          if (panGestureDetector.debug) {
-            logcat(tag = TAG) { "pan() touchesLeftAndRight == true, detectorType=${detectorType}" }
-          }
-          return@awaitPointerEventScope
-        }
-      }
-      ScrollableContainerDirection.Vertical -> {
-        // Same as Horizontal but for vertically scrollable container (LazyColumn/VerticalPager)
-        if (panInfo.touchesTopAndBottom()) {
-          if (panGestureDetector.debug) {
-            logcat(tag = TAG) { "pan() touchesTopAndBottom == true, detectorType=${detectorType}" }
-          }
-          return@awaitPointerEventScope
-        }
-      }
-      null -> {
-        // We are not inside of a scrollable container so continue with the gesture
-      }
-    }
-
     var skipThisGesture = false
+    val scrollableContainerDirection = state.scrollableContainerDirection
+    val touchSlop = viewConfiguration.touchSlop
 
-    val touchSlop = awaitTouchSlopOrCancellation(
-      pointerId = firstDown.id,
-      onTouchSlopReached = { change, _ ->
-        val delta = firstDown.position.x - change.position.x
-        val panInfoNew = state.getPanInfo()
+    if (scrollableContainerDirection != null) {
+      val touchSlopChange = awaitTouchSlopOrCancellation(
+        pointerId = firstDown.id,
+        onTouchSlopReached = { change, _ ->
+          // Detect whether we are able to scroll while inside of a Horizontally/Vertically
+          // scrollable container. Check the distance between the first down event and the
+          // last touch event after touch slop was detected. Then we either consume all the
+          // events and continue with the gesture or exit from the detector thus allowing the
+          // scrollable container to scroll.
+          when (scrollableContainerDirection) {
+            ScrollableContainerDirection.Horizontal -> {
+              val deltaX = firstDown.position.x - change.position.x
+              val panInfoNew = state.getPanInfo()
 
-        if (panInfoNew != null) {
-          if (delta < 0 && panInfoNew.touchesLeft()) {
-            skipThisGesture = true
-            return@awaitTouchSlopOrCancellation
-          } else if (delta > 0 && panInfoNew.touchesRight()) {
-            skipThisGesture = true
-            return@awaitTouchSlopOrCancellation
+              if (panInfoNew != null) {
+                if (deltaX < -touchSlop && panInfoNew.touchesLeft()) {
+                  skipThisGesture = true
+                  return@awaitTouchSlopOrCancellation
+                } else if (deltaX > touchSlop && panInfoNew.touchesRight()) {
+                  skipThisGesture = true
+                  return@awaitTouchSlopOrCancellation
+                }
+              }
+
+              change.consumePositionChange()
+              return@awaitTouchSlopOrCancellation
+            }
+            ScrollableContainerDirection.Vertical -> {
+              val deltaY = firstDown.position.x - change.position.x
+              val panInfoNew = state.getPanInfo()
+
+              if (panInfoNew != null) {
+                if (deltaY < -touchSlop && panInfoNew.touchesTop()) {
+                  skipThisGesture = true
+                  return@awaitTouchSlopOrCancellation
+                } else if (deltaY > touchSlop && panInfoNew.touchesBottom()) {
+                  skipThisGesture = true
+                  return@awaitTouchSlopOrCancellation
+                }
+              }
+
+              change.consumePositionChange()
+              return@awaitTouchSlopOrCancellation
+            }
           }
         }
+      )
 
-        change.consumePositionChange()
-      }
-    )
-
-    if (skipThisGesture || touchSlop == null) {
-      if (panGestureDetector.debug) {
-        logcat(tag = TAG) {
-          "pan() awaitTouchSlopOrCancellation() failed " +
-            "(skipThisGesture=$skipThisGesture, touchSlop==null=${touchSlop == null}), " +
-            "detectorType=${detectorType}"
+      if (skipThisGesture || touchSlopChange == null) {
+        if (panGestureDetector.debug) {
+          logcat(tag = TAG) {
+            "pan() awaitTouchSlopOrCancellation() failed " +
+              "(skipThisGesture=$skipThisGesture, touchSlop==null=${touchSlopChange == null}), " +
+              "detectorType=${detectorType}"
+          }
         }
+        return@awaitPointerEventScope
       }
-      return@awaitPointerEventScope
     }
 
     var lastPointerInputChange: PointerInputChange = firstDown
@@ -383,15 +585,15 @@ private suspend fun PointerInputScope.detectMultiTouchGestures(
       return
     }
 
-    if (multiTouchGestureDetector.debug) {
-      logcat(tag = TAG) { "multi() Gestures NOT locked, detectorType=${detectorType}" }
-    }
-
     if (pointersCount < 2) {
       if (multiTouchGestureDetector.debug) {
         logcat(tag = TAG) { "multi() pointersCount < 2 (pointersCount=$pointersCount), detectorType=${detectorType}" }
       }
       continue
+    }
+
+    if (multiTouchGestureDetector.debug) {
+      logcat(tag = TAG) { "multi() Gestures NOT locked, detectorType=${detectorType}" }
     }
 
     val twoMostRecentEvents = initialPointerEvent.changes
@@ -625,5 +827,16 @@ private suspend fun AwaitPointerEventScope.awaitSecondDown(
     } while (ourChange.uptimeMillis < minUptime)
 
     return@withTimeoutOrNull change
+  }
+}
+
+private fun AwaitPointerEventScope.allPointersUp(): Boolean =
+  !currentEvent.changes.fastAny { it.pressed }
+
+private suspend fun AwaitPointerEventScope.awaitAllPointersUp() {
+  if (!allPointersUp()) {
+    do {
+      val events = awaitPointerEvent(PointerEventPass.Final)
+    } while (events.changes.fastAny { it.pressed })
   }
 }

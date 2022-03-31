@@ -104,7 +104,6 @@ class MainActivity : ComponentActivity() {
 
     ComposeSubsamplingScaleImage(
       modifier = Modifier.fillMaxSize(),
-      pointerInputKey = pagerState.currentPage,
       state = state,
       imageSourceProvider = imageSourceProvider,
       eventListener = eventListener,

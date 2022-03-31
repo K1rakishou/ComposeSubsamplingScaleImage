@@ -199,31 +199,6 @@ fun rememberComposeSubsamplingScaleImageState(
 @Composable
 fun ComposeSubsamplingScaleImage(
   modifier: Modifier = Modifier,
-  /**
-   *  TODO!
-   *
-   *  Hack! When ComposeSubsamplingScaleImage is inside of a LazyColumn/Pager you need to provide
-   *  A. LazyListState.firstVisibleItemIndex() if it's inside of a LazyColumn/LazyRow
-   *  B. PagerState.currentPage() if it's inside of a HorizontalPager/VerticalPager.
-   *  as the pointerInputKey parameter.
-   *
-   *  This is needed because otherwise multi-touch gesture detector (MultiTouchGestureDetector)
-   *  (which detects 2 finger zoom or 2 finger pan) won't be restarted for the new page/item
-   *  so the next 2 finger gesture will be consumed without being processed.
-   *  It won't be restarted because it uses an infinite loop to detect how many fingers
-   *  are currently touching the screen.
-   *
-   *  There is probably a better solution for this problem than this but I couldn't figure it out.
-   *  Basically, I need to figure out how to stop the infinite loop once you switch to a different
-   *  pager page.
-   *
-   *  If ComposeSubsamplingScaleImage is not inside of either of them then just pass Unit.
-   *  See DisplayFullImage() of MainActivity from the sample project.
-   *
-   *  I didn't make pointerInputKey to have Unit as the default parameter so that you are aware
-   *  of this potential bug.
-   * */
-  pointerInputKey: Any /*= Unit*/,
   state: ComposeSubsamplingScaleImageState,
   imageSourceProvider: ImageSourceProvider,
   eventListener: ComposeSubsamplingScaleImageEventListener? = null,
@@ -263,7 +238,7 @@ fun ComposeSubsamplingScaleImage(
   BoxWithConstraints(
     modifier = modifier
       .pointerInput(
-        key1 = pointerInputKey,
+        key1 = Unit,
         block = {
           processGestures(
             state = state,
@@ -318,7 +293,9 @@ fun ComposeSubsamplingScaleImage(
         val fullImageSampleSize by state.fullImageSampleSizeState
 
         Canvas(
-          modifier = Modifier.size(minWidth, minHeight).clipToBounds(),
+          modifier = Modifier
+            .size(minWidth, minHeight)
+            .clipToBounds(),
           onDraw = {
             DrawTileGrid(
               state = state,

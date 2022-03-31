@@ -107,5 +107,12 @@ enum class DetectorType(val index: Int) {
   Zoom(0),
   Pan(1),
   MultiTouch(2),
-  Tap(3)
+  Tap(3);
+
+  companion object {
+    fun from(index: Int): DetectorType {
+      return values().firstOrNull { it.index == index }
+        ?: error("Unexpected index: $index")
+    }
+  }
 }
