@@ -1,11 +1,14 @@
 package com.github.k1rakishou.cssi_lib.gestures
 
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.forEachGesture
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerInputScope
@@ -13,6 +16,7 @@ import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.consumeAllChanges
+import androidx.compose.ui.input.pointer.consumeDownChange
 import androidx.compose.ui.input.pointer.consumePositionChange
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.util.fastAll
@@ -34,6 +38,8 @@ private const val TAG = "ComposeSubsamplingScaleImageGestures"
 
 internal suspend fun PointerInputScope.processGestures(
   state: ComposeSubsamplingScaleImageState,
+  onTap: ((Offset) -> Unit)?,
+  onLongTap: ((Offset) -> Unit)?,
   zoomGestureDetector: ZoomGestureDetector?,
   panGestureDetector: PanGestureDetector?,
   multiTouchGestureDetector: MultiTouchGestureDetector?
@@ -66,6 +72,21 @@ internal suspend fun PointerInputScope.processGestures(
         }
 
         allDetectors.fastForEach { detector -> detector.cancelAnimation() }
+      }
+
+      if (onTap != null || onLongTap != null) {
+        activeDetectorJobs[DetectorType.Tap.index] = launch {
+          detectTapOrLongTapGestures(
+            debug = state.debug,
+            coroutineScope = this,
+            onTap = onTap,
+            onLongTap = onLongTap,
+            detectorType = DetectorType.Tap,
+            cancelAnimations = { allDetectors.fastForEach { detector -> detector.cancelAnimation() } },
+            stopOtherDetectors = { detectorType -> stopOtherDetectors(detectorType) },
+            gesturesLocked = { allDetectors.fastAny { detector -> detector.animating } }
+          )
+        }
       }
 
       activeDetectorJobs[DetectorType.Zoom.index] = launch {
@@ -106,6 +127,69 @@ internal suspend fun PointerInputScope.processGestures(
   }
 }
 
+private suspend fun PointerInputScope.detectTapOrLongTapGestures(
+  debug: Boolean,
+  coroutineScope: CoroutineScope,
+  onTap: ((Offset) -> Unit)?,
+  onLongTap: ((Offset) -> Unit)?,
+  detectorType: DetectorType,
+  cancelAnimations: () -> Unit,
+  stopOtherDetectors: (DetectorType) -> Unit,
+  gesturesLocked: () -> Boolean
+) {
+  awaitPointerEventScope {
+    val firstDown = awaitFirstDown()
+
+    cancelAnimations()
+
+    if (gesturesLocked()) {
+      if (debug) {
+        logcat(tag = TAG) { "tap() Gestures locked detectorType=${detectorType}" }
+      }
+
+      consumeChangesUntilAllPointersAreUp(
+        pointerInputChange = firstDown,
+        coroutineScope = coroutineScope,
+        gesturesLocked = gesturesLocked
+      )
+
+      return@awaitPointerEventScope
+    }
+
+    if (debug) {
+      logcat(tag = TAG) { "tap() Gestures NOT locked, detectorType=${detectorType}" }
+    }
+
+    val longPressTimeout = onLongTap?.let {
+      viewConfiguration.longPressTimeoutMillis
+    } ?: (Long.MAX_VALUE / 2)
+
+    var upOrCancel: PointerInputChange? = null
+    try {
+      upOrCancel = withTimeout(longPressTimeout) { waitForUpOrCancellation() }
+      upOrCancel?.consumeDownChange()
+    } catch (_: PointerEventTimeoutCancellationException) {
+      stopOtherDetectors(detectorType)
+      onLongTap?.invoke(firstDown.position)
+      consumeUntilUp()
+      return@awaitPointerEventScope
+    }
+
+    if (upOrCancel != null) {
+      // Wait 10 additional milliseconds so that double-tap gesture detector has enough time
+      // to cancel this detector in case this gesture is any kind of double-tap gesture.
+      val secondDown = awaitSecondDown(
+        firstUp = upOrCancel,
+        additionalWaitTime = 10L
+      )
+      if (secondDown == null) {
+        stopOtherDetectors(detectorType)
+        onTap?.invoke(upOrCancel.position)
+      }
+    }
+  }
+}
+
 private suspend fun PointerInputScope.detectPanGestures(
   state: ComposeSubsamplingScaleImageState,
   panGestureDetector: PanGestureDetector?,
@@ -129,7 +213,7 @@ private suspend fun PointerInputScope.detectPanGestures(
 
     if (gesturesLocked()) {
       if (panGestureDetector.debug) {
-        logcat(tag = TAG) { "Gestures locked detectorType=${panGestureDetector.detectorType}" }
+        logcat(tag = TAG) { "pan() Gestures locked detectorType=${panGestureDetector.detectorType}" }
       }
 
       consumeChangesUntilAllPointersAreUp(
@@ -286,7 +370,7 @@ private suspend fun PointerInputScope.detectMultiTouchGestures(
 
       awaitPointerEventScope {
         if (multiTouchGestureDetector.debug) {
-          logcat(tag = TAG) { "Gestures locked detectorType=${multiTouchGestureDetector.detectorType}" }
+          logcat(tag = TAG) { "multi() Gestures locked detectorType=${multiTouchGestureDetector.detectorType}" }
         }
 
         consumeChangesUntilAllPointersAreUp(
@@ -399,7 +483,7 @@ private suspend fun PointerInputScope.detectZoomGestures(
 
     if (gesturesLocked()) {
       if (zoomGestureDetector.debug) {
-        logcat(tag = TAG) { "Gestures locked detectorType=${zoomGestureDetector.detectorType}" }
+        logcat(tag = TAG) { "zoom() Gestures locked detectorType=${zoomGestureDetector.detectorType}" }
       }
 
       consumeChangesUntilAllPointersAreUp(
@@ -483,6 +567,13 @@ private suspend fun PointerInputScope.detectZoomGestures(
   }
 }
 
+private suspend fun AwaitPointerEventScope.consumeUntilUp() {
+  do {
+    val event = awaitPointerEvent()
+    event.changes.fastForEach { it.consumeAllChanges() }
+  } while (event.changes.fastAny { it.pressed })
+}
+
 private suspend fun AwaitPointerEventScope.consumeChangesUntilAllPointersAreUp(
   pointerInputChange: PointerInputChange?,
   coroutineScope: CoroutineScope,
@@ -518,10 +609,11 @@ private suspend fun AwaitPointerEventScope.awaitFirstDownOnPass(
 }
 
 private suspend fun AwaitPointerEventScope.awaitSecondDown(
-  firstUp: PointerInputChange
+  firstUp: PointerInputChange,
+  additionalWaitTime: Long = 0L
 ): PointerInputChange? {
   return withTimeoutOrNull(viewConfiguration.doubleTapTimeoutMillis) {
-    val minUptime = firstUp.uptimeMillis + viewConfiguration.doubleTapMinTimeMillis
+    val minUptime = firstUp.uptimeMillis + viewConfiguration.doubleTapMinTimeMillis + additionalWaitTime
     var change: PointerInputChange? = null
 
     // The second tap doesn't count if it happens before DoubleTapMinTime of the first tap

@@ -21,6 +21,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.NativeCanvas
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -226,6 +227,8 @@ fun ComposeSubsamplingScaleImage(
   state: ComposeSubsamplingScaleImageState,
   imageSourceProvider: ImageSourceProvider,
   eventListener: ComposeSubsamplingScaleImageEventListener? = null,
+  onImageTapped: ((Offset) -> Unit)? = null,
+  onImageLongTapped: ((Offset) -> Unit)? = null,
   fullImageLoadingContent: (@Composable () -> Unit)? = null,
   fullImageErrorLoadingContent: (@Composable (Throwable) -> Unit)? = null
 ) {
@@ -264,6 +267,8 @@ fun ComposeSubsamplingScaleImage(
         block = {
           processGestures(
             state = state,
+            onTap = onImageTapped,
+            onLongTap = onImageLongTapped,
             zoomGestureDetector = zoomGestureDetector,
             panGestureDetector = panGestureDetector,
             multiTouchGestureDetector = multiTouchGestureDetector

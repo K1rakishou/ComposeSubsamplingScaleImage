@@ -2,6 +2,7 @@ package com.github.k1rakishou.cssi_sample
 
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -26,6 +27,7 @@ import java.io.StringWriter
 
 class MainActivity : ComponentActivity() {
   private val baseDir = "test_images"
+  private var prevToast: Toast? = null
 
   @OptIn(ExperimentalPagerApi::class)
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -105,9 +107,26 @@ class MainActivity : ComponentActivity() {
       pointerInputKey = pagerState.currentPage,
       state = state,
       imageSourceProvider = imageSourceProvider,
-      eventListener = eventListener
+      eventListener = eventListener,
+      onImageTapped = { offset ->
+        Log.d("DisplayFullImage", "Image tapped at ${offset}")
+        toast("Image tapped at ${offset}")
+      },
+      onImageLongTapped = { offset ->
+        Log.d("DisplayFullImage", "Image long tapped at ${offset}")
+        toast("Image long tapped at ${offset}")
+      }
     )
   }
+
+  private fun toast(message: String) {
+    prevToast?.cancel()
+    prevToast = null
+
+    prevToast = Toast.makeText(this, message, Toast.LENGTH_SHORT)
+    prevToast!!.show()
+  }
+
 }
 
 private fun Throwable.asLog(): String {

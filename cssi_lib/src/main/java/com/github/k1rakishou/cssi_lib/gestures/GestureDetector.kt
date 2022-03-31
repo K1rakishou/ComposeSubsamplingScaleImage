@@ -106,5 +106,6 @@ internal enum class GestureAction {
 enum class DetectorType(val index: Int) {
   Zoom(0),
   Pan(1),
-  MultiTouch(2)
+  MultiTouch(2),
+  Tap(3)
 }
