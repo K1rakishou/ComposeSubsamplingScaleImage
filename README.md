@@ -2,7 +2,7 @@
 
 ![Sample](art/sample.gif)
 
-### Link (expect bugs)
+### Early preview (expect bugs)
 
 ```
 dependencies {
