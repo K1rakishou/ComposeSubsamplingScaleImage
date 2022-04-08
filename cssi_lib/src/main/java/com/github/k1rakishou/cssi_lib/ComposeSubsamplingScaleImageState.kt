@@ -136,7 +136,6 @@ class ComposeSubsamplingScaleImageState internal constructor(
   }
 
   override fun onAbandoned() {
-    reset()
   }
 
   fun imageSaveableState(): ImageSaveableState? {
