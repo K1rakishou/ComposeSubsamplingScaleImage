@@ -54,11 +54,13 @@ class MainActivity : ComponentActivity() {
   private fun DisplayFullImage(imageFileName: String, pagerState: PagerState) {
     val imageSourceProvider = remember(key1 = imageFileName) {
       object : ImageSourceProvider {
-        override suspend fun provide(): ComposeSubsamplingScaleImageSource {
-          return ComposeSubsamplingScaleImageSource(
+        override suspend fun provide(): Result<ComposeSubsamplingScaleImageSource> {
+          val source = ComposeSubsamplingScaleImageSource(
             debugKey = imageFileName,
             inputStream = this@MainActivity.assets.open("$baseDir/${imageFileName}")
           )
+
+          return Result.success(source)
         }
       }
     }

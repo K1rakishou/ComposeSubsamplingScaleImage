@@ -7,6 +7,11 @@ import androidx.compose.ui.unit.IntSize
  * */
 open class ComposeSubsamplingScaleImageEventListener {
   /**
+   * Some kind of an error occurred while during the [ImageSourceProvider.provide] method execution
+   * */
+  open fun onFailedToProvideSource(error: Throwable) { /**no-op*/ }
+
+  /**
    * Called after the image dimensions were decoded
    * */
   open fun onImageInfoDecoded(fullImageSize: IntSize) { /**no-op*/ }

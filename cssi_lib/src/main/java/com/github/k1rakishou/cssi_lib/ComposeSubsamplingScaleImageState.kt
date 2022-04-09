@@ -292,22 +292,38 @@ class ComposeSubsamplingScaleImageState internal constructor(
       }
     }
 
-    val imageDimensionsInfoResult = withContext(coroutineScope.coroutineContext) {
-      imageSourceProvider.provide().let { imageSource ->
-        this@ComposeSubsamplingScaleImageState.debugKey = imageSource.debugKey
+    val provideSourceResult = withContext(coroutineScope.coroutineContext) { imageSourceProvider.provide() }
 
-        imageSource
-          .inputStream
-          .use { inputStream -> decodeImageDimensions(inputStream) }
+    val imageSource = if (provideSourceResult.isFailure) {
+      val error = provideSourceResult.exceptionOrThrow()
+
+      logcatError {
+        "initialize() imageSourceProvider.provide() Failure!\n" +
+          "sourceDebugKey=${debugKey}\n" +
+          "error=${error.asLog()}"
       }
+
+      eventListener?.onFailedToProvideSource(error)
+      reset()
+      return InitializationState.Error(error)
+    } else {
+      provideSourceResult.getOrThrow()
+    }
+
+    val imageDimensionsInfoResult = withContext(coroutineScope.coroutineContext) {
+      this@ComposeSubsamplingScaleImageState.debugKey = imageSource.debugKey
+
+      return@withContext imageSource
+        .inputStream
+        .use { inputStream -> decodeImageDimensions(inputStream) }
     }
 
     val imageDimensions = if (imageDimensionsInfoResult.isFailure) {
       val error = imageDimensionsInfoResult.exceptionOrThrow()
-      logcat {
+      logcatError {
         "initialize() decodeImageDimensions() Failure!\n" +
           "sourceDebugKey=${debugKey}\n" +
-          "imageDimensionsInfoResultError=${error.asLog()}"
+          "error=${error.asLog()}"
       }
 
       eventListener?.onFailedToDecodeImageInfo(error)
