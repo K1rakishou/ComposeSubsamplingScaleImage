@@ -6,7 +6,7 @@
 
 ```
 dependencies {
-  implementation 'com.github.K1rakishou:ComposeSubsamplingScaleImage:fab4ae38cb'
+  implementation 'com.github.K1rakishou:ComposeSubsamplingScaleImage:96b909f63b'
 }
 ```
 
