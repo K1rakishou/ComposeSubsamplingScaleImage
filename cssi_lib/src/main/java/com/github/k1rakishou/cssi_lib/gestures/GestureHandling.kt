@@ -453,7 +453,10 @@ private suspend fun PointerInputScope.detectPanGestures(
               val panInfoNew = state.getPanInfo()
 
               if (panInfoNew != null) {
-                if (deltaX < -touchSlop && panInfoNew.touchesLeft()) {
+                if (panInfoNew.touchesLeftAndRight()) {
+                  skipThisGesture = true
+                  return@awaitTouchSlopOrCancellation
+                } else if (deltaX < -touchSlop && panInfoNew.touchesLeft()) {
                   skipThisGesture = true
                   return@awaitTouchSlopOrCancellation
                 } else if (deltaX > touchSlop && panInfoNew.touchesRight()) {
@@ -466,11 +469,14 @@ private suspend fun PointerInputScope.detectPanGestures(
               return@awaitTouchSlopOrCancellation
             }
             ScrollableContainerDirection.Vertical -> {
-              val deltaY = firstDown.position.x - change.position.x
+              val deltaY = firstDown.position.y - change.position.y
               val panInfoNew = state.getPanInfo()
 
               if (panInfoNew != null) {
-                if (deltaY < -touchSlop && panInfoNew.touchesTop()) {
+                if (panInfoNew.touchesTopAndBottom()) {
+                  skipThisGesture = true
+                  return@awaitTouchSlopOrCancellation
+                } else if (deltaY < -touchSlop && panInfoNew.touchesTop()) {
                   skipThisGesture = true
                   return@awaitTouchSlopOrCancellation
                 } else if (deltaY > touchSlop && panInfoNew.touchesBottom()) {
