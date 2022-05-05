@@ -450,9 +450,28 @@ private suspend fun PointerInputScope.detectPanGestures(
           when (scrollableContainerDirection) {
             ScrollableContainerDirection.Horizontal -> {
               val deltaX = firstDown.position.x - change.position.x
+              val deltaY = firstDown.position.y - change.position.y
               val panInfoNew = state.getPanInfo()
 
               if (panInfoNew != null) {
+                // If scrolling vertically more than horizontally then we need to check whether we
+                // are currently touching either top top or bottom side of the screen
+                // (depending on the direction). If there is still space to scroll then we need to
+                // process this gesture
+                if (deltaY.absoluteValue > deltaX.absoluteValue) {
+                  if (deltaY < 0 && !panInfoNew.touchesTop()) {
+                    skipThisGesture = false
+                    change.consumePositionChange()
+                    return@awaitTouchSlopOrCancellation
+                  } else if (deltaY > 0 && !panInfoNew.touchesBottom()) {
+                    skipThisGesture = false
+                    change.consumePositionChange()
+                    return@awaitTouchSlopOrCancellation
+                  }
+
+                  // fallthrough
+                }
+
                 if (panInfoNew.touchesLeftAndRight()) {
                   skipThisGesture = true
                   return@awaitTouchSlopOrCancellation
@@ -469,10 +488,26 @@ private suspend fun PointerInputScope.detectPanGestures(
               return@awaitTouchSlopOrCancellation
             }
             ScrollableContainerDirection.Vertical -> {
+              val deltaX = firstDown.position.x - change.position.x
               val deltaY = firstDown.position.y - change.position.y
               val panInfoNew = state.getPanInfo()
 
               if (panInfoNew != null) {
+                // Same as for ScrollableContainerDirection.Horizontal but the other axis is used
+                if (deltaX.absoluteValue > deltaY.absoluteValue) {
+                  if (deltaX < 0 && !panInfoNew.touchesRight()) {
+                    skipThisGesture = false
+                    change.consumePositionChange()
+                    return@awaitTouchSlopOrCancellation
+                  } else if (deltaX > 0 && !panInfoNew.touchesLeft()) {
+                    skipThisGesture = false
+                    change.consumePositionChange()
+                    return@awaitTouchSlopOrCancellation
+                  }
+
+                  // fallthrough
+                }
+
                 if (panInfoNew.touchesTopAndBottom()) {
                   skipThisGesture = true
                   return@awaitTouchSlopOrCancellation
