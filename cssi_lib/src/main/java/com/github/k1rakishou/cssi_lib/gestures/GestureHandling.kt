@@ -459,13 +459,23 @@ private suspend fun PointerInputScope.detectPanGestures(
                 // (depending on the direction). If there is still space to scroll then we need to
                 // process this gesture
                 if (deltaY.absoluteValue > deltaX.absoluteValue) {
-                  if (deltaY < 0 && !panInfoNew.touchesTop()) {
-                    skipThisGesture = false
-                    change.consumePositionChange()
+                  if (deltaY < 0) {
+                    if (panInfoNew.touchesTop()) {
+                      skipThisGesture = true
+                    } else {
+                      skipThisGesture = false
+                      change.consumePositionChange()
+                    }
+
                     return@awaitTouchSlopOrCancellation
-                  } else if (deltaY > 0 && !panInfoNew.touchesBottom()) {
-                    skipThisGesture = false
-                    change.consumePositionChange()
+                  } else if (deltaY > 0) {
+                    if (panInfoNew.touchesBottom()) {
+                      skipThisGesture = true
+                    } else {
+                      skipThisGesture = false
+                      change.consumePositionChange()
+                    }
+
                     return@awaitTouchSlopOrCancellation
                   }
 
@@ -495,13 +505,23 @@ private suspend fun PointerInputScope.detectPanGestures(
               if (panInfoNew != null) {
                 // Same as for ScrollableContainerDirection.Horizontal but the other axis is used
                 if (deltaX.absoluteValue > deltaY.absoluteValue) {
-                  if (deltaX < 0 && !panInfoNew.touchesRight()) {
-                    skipThisGesture = false
-                    change.consumePositionChange()
+                  if (deltaX < 0) {
+                    if (panInfoNew.touchesRight()) {
+                      skipThisGesture = true
+                    } else {
+                      skipThisGesture = false
+                      change.consumePositionChange()
+                    }
+
                     return@awaitTouchSlopOrCancellation
-                  } else if (deltaX > 0 && !panInfoNew.touchesLeft()) {
-                    skipThisGesture = false
-                    change.consumePositionChange()
+                  } else if (deltaX > 0) {
+                    if (panInfoNew.touchesLeft()) {
+                      skipThisGesture = true
+                    } else {
+                      skipThisGesture = false
+                      change.consumePositionChange()
+                    }
+
                     return@awaitTouchSlopOrCancellation
                   }
 
