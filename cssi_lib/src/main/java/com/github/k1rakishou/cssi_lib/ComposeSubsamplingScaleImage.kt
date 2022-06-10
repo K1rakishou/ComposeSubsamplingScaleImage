@@ -15,9 +15,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -158,10 +156,6 @@ fun rememberComposeSubsamplingScaleImageState(
     return@remember composeViewConfiguration.doubleTapTimeoutMillis.toInt()
   }
 
-  var imageSaveableState by rememberSaveable(key = "compose_subsampling_scale_image_saveable_state") {
-    mutableStateOf<ImageSaveableState?>(null)
-  }
-
   val composeSubsamplingScaleImageState = remember {
     ComposeSubsamplingScaleImageState(
       context = context,
@@ -180,18 +174,9 @@ fun rememberComposeSubsamplingScaleImageState(
       zoomAnimationDurationMs = zoomAnimationDurationMs,
       flingAnimationDurationMs = flingAnimationDurationMs,
       minDpi = 160,
-      scrollableContainerDirection = scrollableContainerDirection,
-      pendingImageSaveableState = imageSaveableState
+      scrollableContainerDirection = scrollableContainerDirection
     )
   }
-
-  DisposableEffect(
-    key1 = Unit,
-    effect = {
-      onDispose {
-        imageSaveableState = composeSubsamplingScaleImageState.imageSaveableState()
-      }
-    })
 
   return composeSubsamplingScaleImageState
 }

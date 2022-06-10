@@ -4,7 +4,7 @@ import android.graphics.PointF
 import android.os.Parcel
 import android.os.Parcelable
 
-class ImageSaveableState(
+data class ImageSaveableState(
   val scale: Float,
   val center: PointF
 ) : Parcelable {

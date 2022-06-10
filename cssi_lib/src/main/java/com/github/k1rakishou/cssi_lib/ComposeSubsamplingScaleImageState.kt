@@ -54,7 +54,6 @@ class ComposeSubsamplingScaleImageState internal constructor(
   val flingAnimationDurationMs: Int,
   val minDpi: Int,
   val scrollableContainerDirection: ScrollableContainerDirection?,
-  private var pendingImageSaveableState: ImageSaveableState?
 ) : RememberObserver {
   private val decoderDispatcher by decoderDispatcherLazy
   private lateinit var coroutineScope: CoroutineScope
@@ -71,6 +70,7 @@ class ComposeSubsamplingScaleImageState internal constructor(
   private var satTemp = ScaleAndTranslate()
   private var needInitScreenTranslate = true
   private var lastInvalidateTime = 0L
+  private var pendingImageSaveableState: ImageSaveableState? = null
 
   internal var _vTranslate = PointfMut()
   val vTranslate: PointF
@@ -147,6 +147,15 @@ class ComposeSubsamplingScaleImageState internal constructor(
       scale = currentScale,
       center = getCenter()
     )
+  }
+
+  fun applyImageSaveableState(imageSaveableState: ImageSaveableState) {
+    if (pendingImageSaveableState == imageSaveableState) {
+      return
+    }
+
+    pendingImageSaveableState = imageSaveableState
+    requestInvalidate(forced = true)
   }
 
   fun viewToSourceX(vx: Float): Float {
@@ -921,20 +930,19 @@ class ComposeSubsamplingScaleImageState internal constructor(
       return
     }
 
-    val imageSaveableState = pendingImageSaveableState
-      ?: return
+    pendingImageSaveableState?.let { imageSaveableState ->
+      val pendingScale = imageSaveableState.scale
+      val sPendingCenterX = imageSaveableState.center.x
+      val sPendingCenterY = imageSaveableState.center.y
 
-    val pendingScale = imageSaveableState.scale
-    val sPendingCenterX = imageSaveableState.center.x
-    val sPendingCenterY = imageSaveableState.center.y
+      currentScale = pendingScale
+      _vTranslate.x = (viewWidth / 2) - (currentScale * sPendingCenterX)
+      _vTranslate.y = (viewHeight / 2) - (currentScale * sPendingCenterY)
+      pendingImageSaveableState = null
 
-    currentScale = pendingScale
-    _vTranslate.x = (viewWidth / 2) - (currentScale * sPendingCenterX)
-    _vTranslate.y = (viewHeight / 2) - (currentScale * sPendingCenterY)
-    pendingImageSaveableState = null
-
-    fitToBounds(true)
-    refreshRequiredTiles(true)
+      fitToBounds(true)
+      refreshRequiredTiles(true)
+    }
   }
 
   private fun getResources(): Resources = context.resources
