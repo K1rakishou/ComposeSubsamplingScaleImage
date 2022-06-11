@@ -158,7 +158,7 @@ fun rememberComposeSubsamplingScaleImageState(
     return@remember composeViewConfiguration.doubleTapTimeoutMillis.toInt()
   }
 
-  val composeSubsamplingScaleImageState = remember(keys) {
+  val composeSubsamplingScaleImageState = remember(*keys) {
     ComposeSubsamplingScaleImageState(
       context = context,
       maxTileSize = maxMaxTileSizeInfoRemembered,
