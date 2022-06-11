@@ -244,7 +244,7 @@ fun ComposeSubsamplingScaleImage(
 
     if (minWidthPx > 0 && minHeightPx > 0) {
       LaunchedEffect(
-        key1 = state,
+        key1 = Unit,
         block = {
           state.availableDimensions.value = IntSize(minWidthPx, minHeightPx)
           initializationState = state.initialize(imageSourceProvider, eventListener)

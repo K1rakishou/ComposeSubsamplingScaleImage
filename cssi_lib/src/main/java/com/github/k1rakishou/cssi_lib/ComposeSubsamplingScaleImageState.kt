@@ -938,11 +938,12 @@ class ComposeSubsamplingScaleImageState internal constructor(
       currentScale = limitedScale(pendingScale)
       _vTranslate.x = (viewWidth / 2) - (currentScale * sPendingCenterX)
       _vTranslate.y = (viewHeight / 2) - (currentScale * sPendingCenterY)
-      pendingImageSaveableState = null
 
       fitToBounds(true)
       refreshRequiredTiles(true)
     }
+
+    pendingImageSaveableState = null
   }
 
   private fun getResources(): Resources = context.resources
