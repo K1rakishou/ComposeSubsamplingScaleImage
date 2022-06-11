@@ -8,6 +8,7 @@ import android.view.ViewConfiguration
 import android.view.WindowManager
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.runtime.Composable
@@ -222,6 +223,7 @@ fun ComposeSubsamplingScaleImage(
 
   BoxWithConstraints(
     modifier = modifier
+      .fillMaxSize()
       .pointerInput(
         key1 = Unit,
         block = {
