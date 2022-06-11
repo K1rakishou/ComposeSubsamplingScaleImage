@@ -935,7 +935,7 @@ class ComposeSubsamplingScaleImageState internal constructor(
       val sPendingCenterX = imageSaveableState.center.x
       val sPendingCenterY = imageSaveableState.center.y
 
-      currentScale = pendingScale
+      currentScale = limitedScale(pendingScale)
       _vTranslate.x = (viewWidth / 2) - (currentScale * sPendingCenterX)
       _vTranslate.y = (viewHeight / 2) - (currentScale * sPendingCenterY)
       pendingImageSaveableState = null
