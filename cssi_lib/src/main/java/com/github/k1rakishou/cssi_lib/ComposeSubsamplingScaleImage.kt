@@ -103,6 +103,7 @@ private val tileDebugColors by lazy {
  * */
 @Composable
 fun rememberComposeSubsamplingScaleImageState(
+  vararg keys: Any?,
   scrollableContainerDirection: ScrollableContainerDirection?,
   minFlingMoveDistPx: Int = 50,
   minFlingVelocityPxPerSecond: Int? = null,
@@ -157,7 +158,7 @@ fun rememberComposeSubsamplingScaleImageState(
     return@remember composeViewConfiguration.doubleTapTimeoutMillis.toInt()
   }
 
-  val composeSubsamplingScaleImageState = remember {
+  val composeSubsamplingScaleImageState = remember(keys) {
     ComposeSubsamplingScaleImageState(
       context = context,
       maxTileSize = maxMaxTileSizeInfoRemembered,
@@ -243,7 +244,7 @@ fun ComposeSubsamplingScaleImage(
 
     if (minWidthPx > 0 && minHeightPx > 0) {
       LaunchedEffect(
-        key1 = Unit,
+        key1 = state,
         block = {
           state.availableDimensions.value = IntSize(minWidthPx, minHeightPx)
           initializationState = state.initialize(imageSourceProvider, eventListener)

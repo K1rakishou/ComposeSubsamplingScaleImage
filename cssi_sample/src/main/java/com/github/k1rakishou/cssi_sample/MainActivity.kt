@@ -98,6 +98,7 @@ class MainActivity : ComponentActivity() {
     }
 
     val state = rememberComposeSubsamplingScaleImageState(
+      null,
       maxScale = 3f,
       doubleTapZoom = 2f,
       scrollableContainerDirection = ScrollableContainerDirection.Horizontal,
