@@ -245,13 +245,23 @@ fun ComposeSubsamplingScaleImage(
 
   var size by remember { mutableStateOf<IntSize>(IntSize.Zero) }
 
+  val gesturesEnabled = onImageTapped != null ||
+    onImageLongTapped != null ||
+    zoomGestureDetector != null ||
+    panGestureDetector != null ||
+    multiTouchGestureDetector != null
+
   Box(
     modifier = modifier
       .fillMaxSize()
       .onSizeChanged { newSize -> size = newSize }
       .pointerInput(
-        key1 = Unit,
+        key1 = gesturesEnabled,
         block = {
+          if (!gesturesEnabled) {
+            return@pointerInput
+          }
+
           processGestures(
             state = state,
             onTap = onImageTapped,
