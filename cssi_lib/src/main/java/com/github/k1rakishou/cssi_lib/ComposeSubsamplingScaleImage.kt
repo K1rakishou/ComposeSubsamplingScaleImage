@@ -7,15 +7,15 @@ import android.graphics.PointF
 import android.view.ViewConfiguration
 import android.view.WindowManager
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
@@ -222,9 +223,12 @@ fun ComposeSubsamplingScaleImage(
       }
     })
 
-  BoxWithConstraints(
+  var size by remember { mutableStateOf<IntSize>(IntSize.Zero) }
+
+  Box(
     modifier = modifier
       .fillMaxSize()
+      .onSizeChanged { newSize -> size = newSize }
       .pointerInput(
         key1 = Unit,
         block = {
@@ -238,30 +242,46 @@ fun ComposeSubsamplingScaleImage(
           )
         })
   ) {
-    val minWidthPx = with(density) { remember(key1 = minWidth) { minWidth.toPx().toInt() } }
-    val minHeightPx = with(density) { remember(key1 = minHeight) { minHeight.toPx().toInt() } }
+    val widthPx = size.width
+    val heightPx = size.height
+
+    var needReinitialization by remember { mutableStateOf(true) }
     var initializationState by state.initializationState
 
-    if (minWidthPx > 0 && minHeightPx > 0) {
+    if (widthPx > 0 && heightPx > 0) {
       LaunchedEffect(
-        key1 = Unit,
+        key1 = needReinitialization,
         block = {
-          state.availableDimensions.value = IntSize(minWidthPx, minHeightPx)
+          if (!needReinitialization) {
+            return@LaunchedEffect
+          }
+
+          state.availableDimensions.value = IntSize(widthPx, heightPx)
           initializationState = state.initialize(imageSourceProvider, eventListener)
+          needReinitialization = false
         }
       )
 
       LaunchedEffect(
-        key1 = minWidthPx,
-        key2 = minHeightPx,
+        key1 = widthPx,
+        key2 = heightPx,
         key3 = initializationState,
         block = {
-          if (
-            initializationState is InitializationState.Success &&
-            (state.viewWidth != minWidthPx || state.viewHeight != minHeightPx)
-          ) {
-            state.availableDimensions.value = IntSize(minWidthPx, minHeightPx)
-            state.onSizeChanged()
+          when (initializationState) {
+            is InitializationState.Error -> {
+              // no-op
+            }
+            InitializationState.Uninitialized -> {
+              if (state.viewWidth != widthPx || state.viewHeight != heightPx) {
+                needReinitialization = true
+              }
+            }
+            InitializationState.Success -> {
+              if (state.viewWidth != widthPx || state.viewHeight != heightPx) {
+                state.availableDimensions.value = IntSize(widthPx, heightPx)
+                state.onSizeChanged()
+              }
+            }
           }
         }
       )
@@ -282,7 +302,7 @@ fun ComposeSubsamplingScaleImage(
 
         Canvas(
           modifier = Modifier
-            .size(minWidth, minHeight)
+            .fillMaxSize()
             .clipToBounds(),
           onDraw = {
             DrawTileGrid(
