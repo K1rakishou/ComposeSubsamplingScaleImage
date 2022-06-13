@@ -126,6 +126,8 @@ class ComposeSubsamplingScaleImageState internal constructor(
     get() = initializationState.value is InitializationState.Success
   val isReadyForGestures: Boolean
     get() = isReady && viewWidth > 0 && viewHeight > 0 && sourceImageDimensions != null
+  val isReadyForInitialization: Boolean
+    get() = viewWidth > 0 && viewHeight > 0
 
   override fun onRemembered() {
     coroutineScope = CoroutineScope(decoderDispatcher)
@@ -287,6 +289,11 @@ class ComposeSubsamplingScaleImageState internal constructor(
   ): InitializationState {
     BackgroundUtils.ensureMainThread()
 
+    if (!isReadyForInitialization) {
+      reset()
+      return InitializationState.Uninitialized
+    }
+
     if (subsamplingImageDecoder.get() == null) {
       val decoder = imageDecoderProvider.provide()
 
@@ -340,6 +347,11 @@ class ComposeSubsamplingScaleImageState internal constructor(
       return InitializationState.Error(error)
     } else {
       imageDimensionsInfoResult.getOrThrow()
+    }
+
+    if (!isReadyForInitialization) {
+      reset()
+      return InitializationState.Uninitialized
     }
 
     eventListener?.onImageInfoDecoded(imageDimensions)
