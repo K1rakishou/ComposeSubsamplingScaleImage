@@ -63,8 +63,17 @@ class ComposeSubsamplingScaleImageState internal constructor(
 
   internal val tileMap = LinkedHashMap<Int, MutableList<Tile>>()
 
-  val minScale by lazy { calculateMinScale() }
-  val maxScale by lazy { calculateMaxScale(minDpi) }
+  private val initialMinScale by lazy { calculateMinScale() }
+  private val initialMaxScale by lazy { calculateMaxScale(minDpi) }
+
+  private var updatedMinScale: Float? = null
+  private var updatedMaxScale: Float? = null
+
+  val minScale: Float
+    get() = updatedMinScale ?: initialMinScale
+  val maxScale: Float
+    get() = updatedMaxScale ?: initialMaxScale
+
   val doubleTapZoomScale by lazy { calculateDoubleTapZoomScale(doubleTapZoom) }
 
   private var satTemp = ScaleAndTranslate()
@@ -296,6 +305,10 @@ class ComposeSubsamplingScaleImageState internal constructor(
           return@coroutineScope InitializationState.Uninitialized
         }
 
+        if (debug) {
+          logcat { "initialize() called" }
+        }
+
         if (subsamplingImageDecoder.get() == null) {
           val decoder = imageDecoderProvider.provide()
 
@@ -334,6 +347,10 @@ class ComposeSubsamplingScaleImageState internal constructor(
 
         ensureActive()
 
+        if (debug) {
+          logcat { "initialize() got image source" }
+        }
+
         val imageDimensionsInfoResult = withContext(coroutineScope.coroutineContext) {
           this@ComposeSubsamplingScaleImageState.debugKey = imageSource.debugKey
 
@@ -366,6 +383,10 @@ class ComposeSubsamplingScaleImageState internal constructor(
           return@coroutineScope InitializationState.Uninitialized
         }
 
+        if (debug) {
+          logcat { "initialize() got image dimensions: $imageDimensions" }
+        }
+
         eventListener?.onImageInfoDecoded(imageDimensions)
         sourceImageDimensions = imageDimensions
 
@@ -373,71 +394,86 @@ class ComposeSubsamplingScaleImageState internal constructor(
           logcat { "initialize() decodeImageDimensions() Success! imageDimensions=$imageDimensions" }
         }
 
-        satTemp.reset()
-        fitToBounds(true, satTemp)
+        val result = reloadTilesAndFitBounds(imageDimensions)
+        if (result.isFailure) {
+          if (debug) {
+            logcatError { "initialize() failure! ${result.exceptionOrThrow().errorMessageOrClassName()}" }
+          }
 
-        fullImageSampleSizeState.value = calculateInSampleSize(
-          sourceWidth = imageDimensions.width,
-          sourceHeight = imageDimensions.height,
-          scale = satTemp.scale
-        )
-
-        if (fullImageSampleSizeState.value > 1) {
-          fullImageSampleSizeState.value /= 2
+          return@coroutineScope InitializationState.Error(result.exceptionOrThrow())
         }
-
-        tileMap.clear()
-
-        initialiseTileMap(
-          sourceWidth = imageDimensions.width,
-          sourceHeight = imageDimensions.height,
-          maxTileWidth = maxTileSize.width,
-          maxTileHeight = maxTileSize.height,
-          availableWidth = viewWidth,
-          availableHeight = viewHeight,
-          fullImageSampleSize = fullImageSampleSizeState.value,
-          inTileMap = tileMap
-        )
 
         if (debug) {
-          tileMap.entries.forEach { (sampleSize, tiles) ->
-            logcat { "initialiseTileMap sampleSize=$sampleSize, tilesCount=${tiles.size}" }
-          }
-        }
-
-        val currentSampleSize = fullImageSampleSizeState.value
-        val baseGrid = tileMap[currentSampleSize]!!
-
-        val loadTilesResult = loadTiles(
-          currentSampleSize = currentSampleSize,
-          tilesToLoad = baseGrid,
-          eventListener = eventListener
-        )
-
-        if (loadTilesResult.isFailure) {
-          return@coroutineScope InitializationState.Error(loadTilesResult.exceptionOrThrow())
-        }
-
-        fitToBounds(false)
-
-        val refreshTilesResult = refreshRequiredTilesInternal(
-          load = true,
-          sourceWidth = imageDimensions.width,
-          sourceHeight = imageDimensions.height,
-          fullImageSampleSize = fullImageSampleSizeState.value,
-          scale = currentScale
-        )
-
-        if (refreshTilesResult.isFailure) {
-          return@coroutineScope InitializationState.Error(refreshTilesResult.exceptionOrThrow())
+          logcat { "initialize() success!" }
         }
 
         return@coroutineScope InitializationState.Success
       } catch (error: CancellationException) {
+        if (debug) {
+          logcatError { "initialize() canceled" }
+        }
+
         eventListener?.onInitializationCanceled()
         throw error
       }
     }
+  }
+
+  private suspend fun reloadTilesAndFitBounds(imageDimensions: IntSize): Result<Unit> {
+    satTemp.reset()
+    fitToBounds(true, satTemp)
+
+    fullImageSampleSizeState.value = calculateInSampleSize(
+      sourceWidth = imageDimensions.width,
+      sourceHeight = imageDimensions.height,
+      scale = satTemp.scale
+    )
+
+    if (fullImageSampleSizeState.value > 1) {
+      fullImageSampleSizeState.value /= 2
+    }
+
+    tileMap.clear()
+
+    initialiseTileMap(
+      sourceWidth = imageDimensions.width,
+      sourceHeight = imageDimensions.height,
+      maxTileWidth = maxTileSize.width,
+      maxTileHeight = maxTileSize.height,
+      availableWidth = viewWidth,
+      availableHeight = viewHeight,
+      fullImageSampleSize = fullImageSampleSizeState.value,
+      inTileMap = tileMap
+    )
+
+    if (debug) {
+      tileMap.entries.forEach { (sampleSize, tiles) ->
+        logcat { "initialiseTileMap sampleSize=$sampleSize, tilesCount=${tiles.size}" }
+      }
+    }
+
+    val currentSampleSize = fullImageSampleSizeState.value
+    val baseGrid = tileMap[currentSampleSize]!!
+
+    val loadTilesResult = loadTiles(
+      currentSampleSize = currentSampleSize,
+      tilesToLoad = baseGrid,
+      eventListener = null
+    )
+
+    if (loadTilesResult.isFailure) {
+      return loadTilesResult
+    }
+
+    fitToBounds(false)
+
+    return refreshRequiredTilesInternal(
+      load = true,
+      sourceWidth = imageDimensions.width,
+      sourceHeight = imageDimensions.height,
+      fullImageSampleSize = fullImageSampleSizeState.value,
+      scale = currentScale
+    )
   }
 
   private suspend fun decodeImageDimensions(
@@ -949,8 +985,22 @@ class ComposeSubsamplingScaleImageState internal constructor(
     return -change / 2f * (timeF * (timeF - 2) - 1) + from
   }
 
-  internal fun onSizeChanged() {
-    pendingImageSaveableState = ImageSaveableState(currentScale, getCenter())
+  internal suspend fun onSizeChanged(prevWidth: Int, prevHeight: Int) {
+    if (debug) {
+      logcat { "onSizeChanged() previous: ${prevWidth}x${prevHeight} current: ${viewWidth}x${viewHeight}" }
+    }
+
+    val imageDimensions = sourceImageDimensions
+      ?: return
+
+    updatedMinScale = calculateMinScale()
+    updatedMaxScale = calculateMaxScale(minDpi)
+
+    val result = reloadTilesAndFitBounds(imageDimensions)
+    if (result.isFailure) {
+      logcatError { "reloadTilesAndFitBounds() error: ${result.exceptionOrThrow().errorMessageOrClassName()}" }
+    }
+
     requestInvalidate(forced = true)
   }
 

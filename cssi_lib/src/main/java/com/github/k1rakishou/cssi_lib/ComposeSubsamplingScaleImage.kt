@@ -278,8 +278,11 @@ fun ComposeSubsamplingScaleImage(
             }
             InitializationState.Success -> {
               if (state.viewWidth != widthPx || state.viewHeight != heightPx) {
+                val prevWidth = state.viewWidth
+                val prevHeight = state.viewHeight
+
                 state.availableDimensions.value = IntSize(widthPx, heightPx)
-                state.onSizeChanged()
+                state.onSizeChanged(prevWidth, prevHeight)
               }
             }
           }
