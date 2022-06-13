@@ -289,141 +289,158 @@ class ComposeSubsamplingScaleImageState internal constructor(
   ): InitializationState {
     BackgroundUtils.ensureMainThread()
 
-    if (!isReadyForInitialization) {
-      reset()
-      return InitializationState.Uninitialized
-    }
+    return coroutineScope {
+      try {
+        if (!isReadyForInitialization) {
+          reset()
+          return@coroutineScope InitializationState.Uninitialized
+        }
 
-    if (subsamplingImageDecoder.get() == null) {
-      val decoder = imageDecoderProvider.provide()
+        if (subsamplingImageDecoder.get() == null) {
+          val decoder = imageDecoderProvider.provide()
 
-      val success = subsamplingImageDecoder.compareAndSet(null, decoder)
-      if (!success) {
-        val exception = IllegalStateException("Decoder was already initialized!")
-        eventListener?.onFailedToDecodeImageInfo(exception)
+          val success = subsamplingImageDecoder.compareAndSet(null, decoder)
+          if (!success) {
+            val exception = IllegalStateException("Decoder was already initialized!")
+            eventListener?.onFailedToDecodeImageInfo(exception)
 
-        return InitializationState.Error(exception)
-      } else {
-        logcat { "initialize() using ${decoder.javaClass.simpleName} decoder" }
+            return@coroutineScope InitializationState.Error(exception)
+          } else {
+            logcat { "initialize() using ${decoder.javaClass.simpleName} decoder" }
+          }
+        }
+
+        val provideSourceResult = withContext(coroutineScope.coroutineContext) {
+          imageSourceProvider.provide()
+        }
+
+        ensureActive()
+
+        val imageSource = if (provideSourceResult.isFailure) {
+          val error = provideSourceResult.exceptionOrThrow()
+
+          logcatError {
+            "initialize() imageSourceProvider.provide() Failure!\n" +
+              "sourceDebugKey=${debugKey}\n" +
+              "error=${error.asLog()}"
+          }
+
+          eventListener?.onFailedToProvideSource(error)
+          reset()
+          return@coroutineScope InitializationState.Error(error)
+        } else {
+          provideSourceResult.getOrThrow()
+        }
+
+        ensureActive()
+
+        val imageDimensionsInfoResult = withContext(coroutineScope.coroutineContext) {
+          this@ComposeSubsamplingScaleImageState.debugKey = imageSource.debugKey
+
+          return@withContext imageSource
+            .inputStream
+            .use { inputStream -> decodeImageDimensions(inputStream) }
+        }
+
+        ensureActive()
+
+        val imageDimensions = if (imageDimensionsInfoResult.isFailure) {
+          val error = imageDimensionsInfoResult.exceptionOrThrow()
+          logcatError {
+            "initialize() decodeImageDimensions() Failure!\n" +
+              "sourceDebugKey=${debugKey}\n" +
+              "error=${error.asLog()}"
+          }
+
+          eventListener?.onFailedToDecodeImageInfo(error)
+          reset()
+          return@coroutineScope InitializationState.Error(error)
+        } else {
+          imageDimensionsInfoResult.getOrThrow()
+        }
+
+        ensureActive()
+
+        if (!isReadyForInitialization) {
+          reset()
+          return@coroutineScope InitializationState.Uninitialized
+        }
+
+        eventListener?.onImageInfoDecoded(imageDimensions)
+        sourceImageDimensions = imageDimensions
+
+        if (debug) {
+          logcat { "initialize() decodeImageDimensions() Success! imageDimensions=$imageDimensions" }
+        }
+
+        satTemp.reset()
+        fitToBounds(true, satTemp)
+
+        fullImageSampleSizeState.value = calculateInSampleSize(
+          sourceWidth = imageDimensions.width,
+          sourceHeight = imageDimensions.height,
+          scale = satTemp.scale
+        )
+
+        if (fullImageSampleSizeState.value > 1) {
+          fullImageSampleSizeState.value /= 2
+        }
+
+        tileMap.clear()
+
+        initialiseTileMap(
+          sourceWidth = imageDimensions.width,
+          sourceHeight = imageDimensions.height,
+          maxTileWidth = maxTileSize.width,
+          maxTileHeight = maxTileSize.height,
+          availableWidth = viewWidth,
+          availableHeight = viewHeight,
+          fullImageSampleSize = fullImageSampleSizeState.value,
+          inTileMap = tileMap
+        )
+
+        if (debug) {
+          tileMap.entries.forEach { (sampleSize, tiles) ->
+            logcat { "initialiseTileMap sampleSize=$sampleSize, tilesCount=${tiles.size}" }
+          }
+        }
+
+        val currentSampleSize = fullImageSampleSizeState.value
+        val baseGrid = tileMap[currentSampleSize]!!
+
+        val loadTilesResult = loadTiles(
+          currentSampleSize = currentSampleSize,
+          tilesToLoad = baseGrid,
+          eventListener = eventListener
+        )
+
+        if (loadTilesResult.isFailure) {
+          return@coroutineScope InitializationState.Error(loadTilesResult.exceptionOrThrow())
+        }
+
+        fitToBounds(false)
+
+        val refreshTilesResult = refreshRequiredTilesInternal(
+          load = true,
+          sourceWidth = imageDimensions.width,
+          sourceHeight = imageDimensions.height,
+          fullImageSampleSize = fullImageSampleSizeState.value,
+          scale = currentScale
+        )
+
+        if (refreshTilesResult.isFailure) {
+          return@coroutineScope InitializationState.Error(refreshTilesResult.exceptionOrThrow())
+        }
+
+        return@coroutineScope InitializationState.Success
+      } catch (error: CancellationException) {
+        eventListener?.onInitializationCanceled()
+        throw error
       }
     }
-
-    val provideSourceResult = withContext(coroutineScope.coroutineContext) { imageSourceProvider.provide() }
-
-    val imageSource = if (provideSourceResult.isFailure) {
-      val error = provideSourceResult.exceptionOrThrow()
-
-      logcatError {
-        "initialize() imageSourceProvider.provide() Failure!\n" +
-          "sourceDebugKey=${debugKey}\n" +
-          "error=${error.asLog()}"
-      }
-
-      eventListener?.onFailedToProvideSource(error)
-      reset()
-      return InitializationState.Error(error)
-    } else {
-      provideSourceResult.getOrThrow()
-    }
-
-    val imageDimensionsInfoResult = withContext(coroutineScope.coroutineContext) {
-      this@ComposeSubsamplingScaleImageState.debugKey = imageSource.debugKey
-
-      return@withContext imageSource
-        .inputStream
-        .use { inputStream -> decodeImageDimensions(inputStream) }
-    }
-
-    val imageDimensions = if (imageDimensionsInfoResult.isFailure) {
-      val error = imageDimensionsInfoResult.exceptionOrThrow()
-      logcatError {
-        "initialize() decodeImageDimensions() Failure!\n" +
-          "sourceDebugKey=${debugKey}\n" +
-          "error=${error.asLog()}"
-      }
-
-      eventListener?.onFailedToDecodeImageInfo(error)
-      reset()
-      return InitializationState.Error(error)
-    } else {
-      imageDimensionsInfoResult.getOrThrow()
-    }
-
-    if (!isReadyForInitialization) {
-      reset()
-      return InitializationState.Uninitialized
-    }
-
-    eventListener?.onImageInfoDecoded(imageDimensions)
-    sourceImageDimensions = imageDimensions
-
-    if (debug) {
-      logcat { "initialize() decodeImageDimensions() Success! imageDimensions=$imageDimensions" }
-    }
-
-    satTemp.reset()
-    fitToBounds(true, satTemp)
-
-    fullImageSampleSizeState.value = calculateInSampleSize(
-      sourceWidth = imageDimensions.width,
-      sourceHeight = imageDimensions.height,
-      scale = satTemp.scale
-    )
-
-    if (fullImageSampleSizeState.value > 1) {
-      fullImageSampleSizeState.value /= 2
-    }
-
-    tileMap.clear()
-
-    initialiseTileMap(
-      sourceWidth = imageDimensions.width,
-      sourceHeight = imageDimensions.height,
-      maxTileWidth = maxTileSize.width,
-      maxTileHeight = maxTileSize.height,
-      availableWidth = viewWidth,
-      availableHeight = viewHeight,
-      fullImageSampleSize = fullImageSampleSizeState.value,
-      inTileMap = tileMap
-    )
-
-    if (debug) {
-      tileMap.entries.forEach { (sampleSize, tiles) ->
-        logcat { "initialiseTileMap sampleSize=$sampleSize, tilesCount=${tiles.size}" }
-      }
-    }
-
-    val currentSampleSize = fullImageSampleSizeState.value
-    val baseGrid = tileMap[currentSampleSize]!!
-
-    val loadTilesResult = loadTiles(
-      currentSampleSize = currentSampleSize,
-      tilesToLoad = baseGrid,
-      eventListener = eventListener
-    )
-
-    if (loadTilesResult.isFailure) {
-      return InitializationState.Error(loadTilesResult.exceptionOrThrow())
-    }
-
-    fitToBounds(false)
-
-    val refreshTilesResult = refreshRequiredTilesInternal(
-      load = true,
-      sourceWidth = imageDimensions.width,
-      sourceHeight = imageDimensions.height,
-      fullImageSampleSize = fullImageSampleSizeState.value,
-      scale = currentScale
-    )
-
-    if (refreshTilesResult.isFailure) {
-      return InitializationState.Error(refreshTilesResult.exceptionOrThrow())
-    }
-
-    return InitializationState.Success
   }
 
-  private fun decodeImageDimensions(
+  private suspend fun decodeImageDimensions(
     inputStream: InputStream
   ): Result<IntSize> {
     BackgroundUtils.ensureBackgroundThread()
@@ -432,7 +449,7 @@ class ComposeSubsamplingScaleImageState internal constructor(
       val decoder = subsamplingImageDecoder.get()
         ?: error("Decoder is not initialized!")
 
-      return@Try decoder.init(context, inputStream).unwrap()
+      return@Try runInterruptible { decoder.init(context, inputStream).unwrap() }
     }
   }
 

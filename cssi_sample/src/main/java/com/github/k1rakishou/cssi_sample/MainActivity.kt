@@ -94,6 +94,10 @@ class MainActivity : ComponentActivity() {
         override fun onFailedToLoadFullImage(error: Throwable) {
           Log.e("DisplayFullImage", "onFailedToLoadFullImage() error=${error.asLog()}")
         }
+
+        override fun onInitializationCanceled() {
+          Log.e("DisplayFullImage", "onInitializationCanceled()")
+        }
       }
     }
 

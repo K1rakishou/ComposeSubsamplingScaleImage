@@ -42,4 +42,6 @@ open class ComposeSubsamplingScaleImageEventListener {
    * initialized for some weird reason)
    * */
   open fun onFailedToLoadFullImage(error: Throwable) { /**no-op*/ }
+
+  open fun onInitializationCanceled() { /**no-op*/ }
 }
