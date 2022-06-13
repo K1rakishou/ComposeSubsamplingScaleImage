@@ -189,6 +189,7 @@ fun ComposeSubsamplingScaleImage(
   modifier: Modifier = Modifier,
   state: ComposeSubsamplingScaleImageState,
   imageSourceProvider: ImageSourceProvider,
+  enableGestures: Boolean = true,
   eventListener: ComposeSubsamplingScaleImageEventListener? = null,
   onImageTapped: ((Offset) -> Unit)? = null,
   onImageLongTapped: ((Offset) -> Unit)? = null,
@@ -209,17 +210,36 @@ fun ComposeSubsamplingScaleImage(
 
   val density = LocalDensity.current
   val debugValues = remember { DebugValues(density) }
-  val zoomGestureDetector = remember { ZoomGestureDetector(density, state) }
-  val panGestureDetector = remember { PanGestureDetector(density, state) }
-  val multiTouchGestureDetector = remember { MultiTouchGestureDetector(density, state) }
+
+  val zoomGestureDetector = remember(key1 = enableGestures) {
+    if (enableGestures) {
+      ZoomGestureDetector(density, state)
+    } else {
+      null
+    }
+  }
+  val panGestureDetector = remember(key1 = enableGestures) {
+    if (enableGestures) {
+      PanGestureDetector(density, state)
+    } else {
+      null
+    }
+  }
+  val multiTouchGestureDetector = remember(key1 = enableGestures) {
+    if (enableGestures) {
+      MultiTouchGestureDetector(density, state)
+    } else {
+      null
+    }
+  }
 
   DisposableEffect(
-    key1 = Unit,
+    key1 = enableGestures,
     effect = {
       onDispose {
-        zoomGestureDetector.cancelAnimation()
-        panGestureDetector.cancelAnimation()
-        multiTouchGestureDetector.cancelAnimation()
+        zoomGestureDetector?.cancelAnimation()
+        panGestureDetector?.cancelAnimation()
+        multiTouchGestureDetector?.cancelAnimation()
       }
     })
 
@@ -317,7 +337,7 @@ fun ComposeSubsamplingScaleImage(
             )
 
             if (state.debug) {
-              zoomGestureDetector.debugDraw(this)
+              zoomGestureDetector?.debugDraw(this)
             }
           }
         )
