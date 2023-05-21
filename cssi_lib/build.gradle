@@ -4,7 +4,7 @@ apply plugin: 'kotlin-android'
 group = 'com.github.K1rakishou.cssi_lib'
 
 android {
-    compileSdk 31
+    compileSdk 33
 
     defaultConfig {
         minSdk 21
@@ -19,7 +19,7 @@ android {
         compose true
     }
     composeOptions {
-        kotlinCompilerExtensionVersion compose_version
+        kotlinCompilerExtensionVersion compose_compiler_version
     }
     kotlinOptions {
         jvmTarget = '1.8'
