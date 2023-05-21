@@ -457,21 +457,13 @@ private suspend fun PointerInputScope.detectPanGestures(
                 // process this gesture
                 if (deltaY.absoluteValue > deltaX.absoluteValue) {
                   if (deltaY < 0) {
-                    if (panInfoNew.touchesTop()) {
-                      skipThisGesture = true
-                    } else {
-                      skipThisGesture = false
-                      change.consume()
-                    }
+                    skipThisGesture = false
+                    change.consume()
 
                     return@awaitTouchSlopOrCancellation
                   } else if (deltaY > 0) {
-                    if (panInfoNew.touchesBottom()) {
-                      skipThisGesture = true
-                    } else {
-                      skipThisGesture = false
-                      change.consume()
-                    }
+                    skipThisGesture = false
+                    change.consume()
 
                     return@awaitTouchSlopOrCancellation
                   }
@@ -503,21 +495,13 @@ private suspend fun PointerInputScope.detectPanGestures(
                 // Same as for ScrollableContainerDirection.Horizontal but the other axis is used
                 if (deltaX.absoluteValue > deltaY.absoluteValue) {
                   if (deltaX < 0) {
-                    if (panInfoNew.touchesRight()) {
-                      skipThisGesture = true
-                    } else {
-                      skipThisGesture = false
-                      change.consume()
-                    }
+                    skipThisGesture = false
+                    change.consume()
 
                     return@awaitTouchSlopOrCancellation
                   } else if (deltaX > 0) {
-                    if (panInfoNew.touchesLeft()) {
-                      skipThisGesture = true
-                    } else {
-                      skipThisGesture = false
-                      change.consume()
-                    }
+                    skipThisGesture = false
+                    change.consume()
 
                     return@awaitTouchSlopOrCancellation
                   }
