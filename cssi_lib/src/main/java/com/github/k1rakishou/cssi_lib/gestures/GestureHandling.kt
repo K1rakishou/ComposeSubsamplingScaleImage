@@ -15,9 +15,6 @@ import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
-import androidx.compose.ui.input.pointer.consumeAllChanges
-import androidx.compose.ui.input.pointer.consumeDownChange
-import androidx.compose.ui.input.pointer.consumePositionChange
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.util.fastAll
 import androidx.compose.ui.util.fastAny
@@ -26,13 +23,13 @@ import androidx.compose.ui.util.fastForEach
 import com.github.k1rakishou.cssi_lib.ComposeSubsamplingScaleImageState
 import com.github.k1rakishou.cssi_lib.ScrollableContainerDirection
 import com.github.k1rakishou.cssi_lib.helpers.logcat
-import kotlin.math.absoluteValue
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.math.absoluteValue
 
 private const val TAG = "ComposeSubsamplingScaleImageGestures"
 
@@ -364,7 +361,7 @@ private suspend fun PointerInputScope.detectTapOrLongTapGestures(
         }
       }
 
-      upOrCancel?.consumeDownChange()
+      upOrCancel?.consume()
     } catch (_: PointerEventTimeoutCancellationException) {
       stopOtherDetectors(detectorType)
       onLongTap?.invoke(firstDown.position)
@@ -464,7 +461,7 @@ private suspend fun PointerInputScope.detectPanGestures(
                       skipThisGesture = true
                     } else {
                       skipThisGesture = false
-                      change.consumePositionChange()
+                      change.consume()
                     }
 
                     return@awaitTouchSlopOrCancellation
@@ -473,7 +470,7 @@ private suspend fun PointerInputScope.detectPanGestures(
                       skipThisGesture = true
                     } else {
                       skipThisGesture = false
-                      change.consumePositionChange()
+                      change.consume()
                     }
 
                     return@awaitTouchSlopOrCancellation
@@ -494,7 +491,7 @@ private suspend fun PointerInputScope.detectPanGestures(
                 }
               }
 
-              change.consumePositionChange()
+              change.consume()
               return@awaitTouchSlopOrCancellation
             }
             ScrollableContainerDirection.Vertical -> {
@@ -510,7 +507,7 @@ private suspend fun PointerInputScope.detectPanGestures(
                       skipThisGesture = true
                     } else {
                       skipThisGesture = false
-                      change.consumePositionChange()
+                      change.consume()
                     }
 
                     return@awaitTouchSlopOrCancellation
@@ -519,7 +516,7 @@ private suspend fun PointerInputScope.detectPanGestures(
                       skipThisGesture = true
                     } else {
                       skipThisGesture = false
-                      change.consumePositionChange()
+                      change.consume()
                     }
 
                     return@awaitTouchSlopOrCancellation
@@ -540,7 +537,7 @@ private suspend fun PointerInputScope.detectPanGestures(
                 }
               }
 
-              change.consumePositionChange()
+              change.consume()
               return@awaitTouchSlopOrCancellation
             }
           }
@@ -581,7 +578,7 @@ private suspend fun PointerInputScope.detectPanGestures(
           panGestureDetector.onGestureUpdated(listOf(pointerInputChange))
         }
 
-        pointerInputChange.consumeAllChanges()
+        pointerInputChange.consume()
         lastPointerInputChange = pointerInputChange
       }
     } catch (error: Throwable) {
@@ -629,7 +626,7 @@ private suspend fun PointerInputScope.detectMultiTouchGestures(
     cancelAnimations()
 
     if (gesturesLocked()) {
-      initialPointerEvent.changes.fastForEach { it.consumeAllChanges() }
+      initialPointerEvent.changes.fastForEach { it.consume() }
 
       awaitPointerEventScope {
         if (multiTouchGestureDetector.debug) {
@@ -683,7 +680,7 @@ private suspend fun PointerInputScope.detectMultiTouchGestures(
       multiTouchGestureDetector.onGestureStarted(twoMostRecentEvents)
 
       stopOtherDetectors(detectorType)
-      initialPointerEvent.changes.fastForEach { it.consumeAllChanges() }
+      initialPointerEvent.changes.fastForEach { it.consume() }
 
       var firstPointerChange = twoMostRecentEvents[0]
       var secondPointerChange = twoMostRecentEvents[1]
@@ -698,7 +695,7 @@ private suspend fun PointerInputScope.detectMultiTouchGestures(
             break
           }
 
-          pointerEvent.changes.fastForEach { it.consumeAllChanges() }
+          pointerEvent.changes.fastForEach { it.consume() }
 
           firstPointerChange = pointerEvent.changes.fastFirstOrNull { it.id == firstEventId } ?: break
           secondPointerChange = pointerEvent.changes.fastFirstOrNull { it.id == secondEventId } ?: break
@@ -791,7 +788,7 @@ private suspend fun PointerInputScope.detectZoomGestures(
       return@awaitPointerEventScope
     }
 
-    secondDown.consumeAllChanges()
+    secondDown.consume()
 
     var lastPointerInputChange = secondDown
     var canceled = false
@@ -815,7 +812,7 @@ private suspend fun PointerInputScope.detectZoomGestures(
           zoomGestureDetector.onGestureUpdated(listOf(pointerInputChange))
         }
 
-        pointerInputChange.consumeAllChanges()
+        pointerInputChange.consume()
         lastPointerInputChange = pointerInputChange
       }
     } catch (error: Throwable) {
@@ -833,7 +830,7 @@ private suspend fun PointerInputScope.detectZoomGestures(
 private suspend fun AwaitPointerEventScope.consumeUntilUp() {
   do {
     val event = awaitPointerEvent()
-    event.changes.fastForEach { it.consumeAllChanges() }
+    event.changes.fastForEach { it.consume() }
   } while (event.changes.fastAny { it.pressed })
 }
 
@@ -842,7 +839,7 @@ private suspend fun AwaitPointerEventScope.consumeChangesUntilAllPointersAreUp(
   coroutineScope: CoroutineScope,
   gesturesLocked: () -> Boolean
 ) {
-  pointerInputChange?.consumeAllChanges()
+  pointerInputChange?.consume()
 
   while (coroutineScope.isActive && gesturesLocked()) {
     val event = awaitPointerEvent(pass = PointerEventPass.Main)
@@ -851,7 +848,7 @@ private suspend fun AwaitPointerEventScope.consumeChangesUntilAllPointersAreUp(
       break
     }
 
-    event.changes.fastForEach { it.consumeAllChanges() }
+    event.changes.fastForEach { it.consume() }
   }
 }
 
