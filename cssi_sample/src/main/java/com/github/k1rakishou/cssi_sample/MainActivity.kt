@@ -128,7 +128,6 @@ class MainActivity : ComponentActivity() {
       }
     }
 
-    var availableSize by remember { mutableStateOf(IntSize.Zero) }
     var maxSize by remember { mutableStateOf(true) }
 
     val sizeModifier = if (maxSize) {
@@ -139,12 +138,10 @@ class MainActivity : ComponentActivity() {
 
     Box(
       modifier = Modifier
-        .then(sizeModifier)
-        .onSizeChanged { newSize -> availableSize = newSize },
+        .then(sizeModifier),
       contentAlignment = Alignment.Center
     ) {
       val state = rememberComposeSubsamplingScaleImageState(
-        availableSize,
         maxScale = 3f,
         doubleTapZoom = 2f,
         scrollableContainerDirection = ScrollableContainerDirection.Horizontal,
