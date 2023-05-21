@@ -42,8 +42,6 @@ class GestureAnimation<Params>(
 
       try {
         while (job.isActive) {
-          job.ensureActive()
-
           if (!state.isReadyForGestures || animationJob == null) {
             break
           }

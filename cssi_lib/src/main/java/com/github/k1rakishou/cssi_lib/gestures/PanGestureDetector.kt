@@ -37,9 +37,6 @@ class PanGestureDetector(
 
     val offset = pointerInputChange.position
     velocityTracker.resetTracking()
-    pointerInputChanges.fastForEach { pic ->
-      velocityTracker.addPointerInputChange(pic)
-    }
 
     startOffset.set(offset.x, offset.y)
     vCenterStart.set(offset.x, offset.y)
@@ -94,10 +91,6 @@ class PanGestureDetector(
     val endOffset = pointerInputChange.position
     val minVelocity = state.minFlingVelocityPxPerSecond
     val minDist = state.minFlingMoveDistPx
-
-    pointerInputChanges.fastForEach { pic ->
-      velocityTracker.addPointerInputChange(pic)
-    }
 
     if (
       !canceled &&
